@@ -7,6 +7,7 @@ from app.api.routes.profile import router as profile_router
 from app.api.routes.resume import router as resume_router
 from app.api.routes.education import router as education_router
 from app.api.routes.experience import router as experience_router
+from app.api.routes.skill import router as skill_router
 
 
 app = FastAPI(
@@ -38,6 +39,11 @@ app.include_router(
 
 app.include_router(
     experience_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    skill_router,
     prefix="/api/v1",
 )
 
