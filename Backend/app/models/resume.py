@@ -82,3 +82,9 @@ class Resume(Base):
     back_populates="resume",
     cascade="all, delete-orphan",
 )
+
+    projects = relationship(
+    "Project",
+    back_populates="resume",
+    cascade="all, delete-orphan",
+)

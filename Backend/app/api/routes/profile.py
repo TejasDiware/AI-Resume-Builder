@@ -86,11 +86,6 @@ def get_profile(
     return profile
 
 
-
-
-
-
-
 @router.put(
     "",
     response_model=CandidateProfileResponse,
@@ -129,7 +124,6 @@ def update_profile(
     db.refresh(profile)
 
     return profile
-
 
 
 @router.delete(
