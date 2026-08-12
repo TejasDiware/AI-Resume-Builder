@@ -64,3 +64,9 @@ class Resume(Base):
         "User",
         back_populates="resumes",
     )
+
+    education = relationship(
+    "Education",
+    back_populates="resume",
+    cascade="all, delete-orphan",
+)
