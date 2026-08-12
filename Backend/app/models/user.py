@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 
@@ -60,3 +60,10 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    candidate_profile = relationship(
+    "CandidateProfile",
+    back_populates="user",
+    uselist=False,
+    cascade="all, delete-orphan",
+)
