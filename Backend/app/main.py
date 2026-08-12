@@ -1,4 +1,8 @@
 from fastapi import FastAPI
+from sqlalchemy import text
+
+from app.database.session import engine
+
 
 app = FastAPI(
     title="AI Resume Builder API",
@@ -17,4 +21,14 @@ def root():
 def health_check():
     return {
         "status": "healthy"
+    }
+
+
+@app.get("/health/db")
+def database_health():
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+    return {
+        "database": "connected"
     }
