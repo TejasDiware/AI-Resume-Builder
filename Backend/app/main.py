@@ -4,6 +4,7 @@ from sqlalchemy import text
 from app.database.session import engine
 from app.api.routes.auth import router as auth_router
 from app.api.routes.profile import router as profile_router
+from app.api.routes.resume import router as resume_router
 
 
 app = FastAPI(
@@ -20,6 +21,11 @@ app.include_router(
 
 app.include_router(
     profile_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    resume_router,
     prefix="/api/v1",
 )
 
