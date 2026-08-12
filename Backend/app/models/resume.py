@@ -70,3 +70,9 @@ class Resume(Base):
     back_populates="resume",
     cascade="all, delete-orphan",
 )
+
+    experience = relationship(
+    "Experience",
+    back_populates="resume",
+    cascade="all, delete-orphan",
+)
