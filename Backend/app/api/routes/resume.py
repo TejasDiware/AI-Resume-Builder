@@ -52,7 +52,10 @@ def get_resumes(
     resumes = db.scalars(
         select(Resume)
         .where(Resume.user_id == current_user.id)
-        .order_by(Resume.created_at.desc())
+        .order_by(
+            Resume.created_at.desc(),
+            Resume.id.desc(),
+        )
     ).all()
 
     return resumes
