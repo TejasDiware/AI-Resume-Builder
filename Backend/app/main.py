@@ -10,6 +10,7 @@ from app.api.routes.experience import router as experience_router
 from app.api.routes.skill import router as skill_router
 from app.api.routes.project import router as project_router
 from app.api.routes.certification import router as certification_router
+from app.api.routes.language import router as language_router
 
 
 app = FastAPI(
@@ -59,6 +60,10 @@ app.include_router(
     prefix="/api/v1",
 )
 
+app.include_router(
+    language_router,
+    prefix="/api/v1",
+)
 
 @app.get("/")
 def root():
