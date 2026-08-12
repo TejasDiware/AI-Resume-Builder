@@ -94,3 +94,9 @@ class Resume(Base):
     back_populates="resume",
     cascade="all, delete-orphan",
 )
+
+    languages = relationship(
+    "Language",
+    back_populates="resume",
+    cascade="all, delete-orphan",
+)

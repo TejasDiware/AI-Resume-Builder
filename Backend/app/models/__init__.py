@@ -6,6 +6,7 @@ from app.models.experience import Experience
 from app.models.skill import Skill
 from app.models.project import Project
 from app.models.certification import Certification
+from app.models.language import Language
 
 __all__ = [
     "CandidateProfile",
@@ -18,5 +19,6 @@ __all__ = [
     "Experience",
     "Skill",
     "Project",
-    "Certification"
+    "Certification",
+    "Language",
 ]
