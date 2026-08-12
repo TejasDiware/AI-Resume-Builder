@@ -100,3 +100,9 @@ class Resume(Base):
     back_populates="resume",
     cascade="all, delete-orphan",
 )
+
+    achievements = relationship(
+    "Achievement",
+    back_populates="resume",
+    cascade="all, delete-orphan",
+)
