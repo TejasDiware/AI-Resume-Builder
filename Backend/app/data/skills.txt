@@ -1,0 +1,32 @@
+Python
+Java
+C++
+JavaScript
+TypeScript
+SQL
+MySQL
+PostgreSQL
+MongoDB
+FastAPI
+Flask
+Django
+React
+Angular
+Node.js
+Docker
+Kubernetes
+AWS
+Azure
+GCP
+Git
+GitHub
+Linux
+TensorFlow
+PyTorch
+Machine Learning
+Deep Learning
+NLP
+Pandas
+NumPy
+Scikit-learn
+OpenCV

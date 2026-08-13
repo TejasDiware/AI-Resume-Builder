@@ -18,11 +18,19 @@ from app.api.routes.ats import router as ats_router
 from app.api.routes.pdf import router as pdf_router
 from app.api.routes.quality import router as quality_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.resume_upload import (
+    router as resume_upload_router,
+)
 
 
 app = FastAPI(
     title="AI Resume Builder API",
     version="1.0.0",
+)
+
+app.include_router(
+    resume_upload_router,
+    prefix="/api/v1",
 )
 
 app.include_router(
