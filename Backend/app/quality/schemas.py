@@ -20,3 +20,10 @@ class ResumeQualityResponse(BaseModel):
 
     issues: list[str]
     recommendations: list[str]
+
+class AIResumeQualityResponse(BaseModel):
+    resume_id: int
+    overall_score: float
+
+    priority: list[str]
+    recommendations: list[str]
