@@ -15,6 +15,7 @@ from app.api.routes.achievement import router as achievement_router
 from app.api.routes.ai import router as ai_router
 from app.api.routes.resume_version import router as resume_version_router
 from app.api.routes.job_description import router as job_description_router
+from app.api.routes.ats import router as ats_router
 
 
 app = FastAPI(
@@ -86,6 +87,11 @@ app.include_router(
 
 app.include_router(
     job_description_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    ats_router,
     prefix="/api/v1",
 )
 

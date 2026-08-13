@@ -7,6 +7,11 @@ import json
 
 from app.ai.jd_schemas import JobDescriptionAnalysis
 from app.ai.prompts import JOB_DESCRIPTION_ANALYSIS_PROMPT
+from app.ats.schemas import ATSOptimizationResponse
+from app.ai.prompts import ATS_OPTIMIZATION_PROMPT
+
+from app.ats.schemas import OptimizeSectionResponse
+from app.ai.prompts import SECTION_OPTIMIZATION_PROMPT
 
 
 from app.ai.provider import LLMProvider
@@ -204,4 +209,92 @@ class AIService:
         except ValueError as exc:
             raise RuntimeError(
                 "AI returned an invalid job description analysis"
+            ) from exc
+
+
+    def optimize_resume_for_job(
+        self,
+        resume_id: int,
+        job_description_id: int,
+        score: float,
+        matched_skills: list[str],
+        missing_skills: list[str],
+        matched_keywords: list[str],
+        missing_keywords: list[str],
+        profile: str,
+        experience: str,
+        projects: str,
+        job_description: str,
+    ) -> ATSOptimizationResponse:
+
+        prompt = ATS_OPTIMIZATION_PROMPT.format(
+            score=score,
+            matched_skills=", ".join(matched_skills),
+            missing_skills=", ".join(missing_skills),
+            matched_keywords=", ".join(matched_keywords),
+            missing_keywords=", ".join(missing_keywords),
+            profile=profile,
+            experience=experience,
+            projects=projects,
+            job_description=job_description,
+        )
+
+        raw_response = self.provider.generate(prompt)
+
+        try:
+            data = json.loads(raw_response)
+
+            return ATSOptimizationResponse(
+                resume_id=resume_id,
+                job_description_id=job_description_id,
+                current_score=score,
+                priority=data.get("priority", []),
+                recommendations=data.get(
+                    "recommendations",
+                    [],
+                ),
+            )
+
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise RuntimeError(
+                "AI returned an invalid ATS optimization response"
+            ) from exc
+
+
+    def optimize_section(
+        self,
+        resume_id: int,
+        section: str,
+        original_content: str,
+        job_description: str,
+        missing_skills: list[str],
+        missing_keywords: list[str],
+        instruction: str | None,
+    ) -> OptimizeSectionResponse:
+
+        prompt = SECTION_OPTIMIZATION_PROMPT.format(
+            section=section,
+            original_content=original_content,
+            job_description=job_description,
+            missing_skills=", ".join(missing_skills),
+            missing_keywords=", ".join(missing_keywords),
+            instruction=instruction or "",
+        )
+
+        raw_response = self.provider.generate(prompt)
+
+        try:
+            data = json.loads(raw_response)
+
+            return OptimizeSectionResponse(
+                resume_id=resume_id,
+                section=section,
+                original_content=original_content,
+                optimized_content=data["optimized_content"],
+                changes=data.get("changes", []),
+            )
+
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            raise RuntimeError(
+                "AI returned an invalid section optimization response"
             ) from exc
