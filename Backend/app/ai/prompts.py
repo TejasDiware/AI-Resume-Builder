@@ -194,3 +194,102 @@ Company:
 Job description:
 {description}
 """
+
+ATS_OPTIMIZATION_PROMPT = """
+You are an expert resume optimization assistant.
+
+Analyze the ATS evaluation below and provide actionable resume improvement
+recommendations for the candidate.
+
+STRICT RULES:
+- Never invent skills, technologies, achievements, metrics, companies,
+  responsibilities, or experience.
+- Never tell the candidate to claim a skill they do not have.
+- Missing skills must be clearly labeled as missing.
+- Suggest adding a missing skill ONLY if the candidate genuinely has it.
+- Focus on improvements that can increase relevance to the job description.
+- Prioritize the most important improvements first.
+- Be concise and practical.
+- Return ONLY valid JSON.
+- Do not use markdown fences.
+
+Return exactly:
+
+{{
+  "priority": [],
+  "recommendations": []
+}}
+
+ATS Score:
+{score}
+
+Matched Skills:
+{matched_skills}
+
+Missing Skills:
+{missing_skills}
+
+Matched Keywords:
+{matched_keywords}
+
+Missing Keywords:
+{missing_keywords}
+
+Resume Profile:
+{profile}
+
+Resume Experience:
+{experience}
+
+Resume Projects:
+{projects}
+
+Job Description:
+{job_description}
+"""
+
+
+
+SECTION_OPTIMIZATION_PROMPT = """
+You are an expert resume optimization assistant.
+
+Improve ONLY the requested resume section for the target job.
+
+STRICT RULES:
+- Preserve all factual information.
+- Never invent technologies, metrics, achievements, responsibilities,
+  companies, dates, users, or results.
+- Do not add missing skills unless they are already supported by the
+  candidate's provided information.
+- Improve clarity, relevance, wording, and ATS alignment.
+- Naturally incorporate relevant job-description terminology only when
+  it accurately describes the candidate's experience.
+- Do not change facts.
+- Return ONLY valid JSON.
+- Do not use markdown fences.
+
+Return exactly:
+
+{{
+  "optimized_content": "string",
+  "changes": []
+}}
+
+Section:
+{section}
+
+Original content:
+{original_content}
+
+Job description:
+{job_description}
+
+ATS missing skills:
+{missing_skills}
+
+ATS missing keywords:
+{missing_keywords}
+
+Additional instruction:
+{instruction}
+"""
