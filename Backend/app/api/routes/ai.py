@@ -27,6 +27,7 @@ from app.ai.schemas import (
     ImproveTextResponse,
     TailoredResumeRequest,
     TailoredResumeResponse,
+    ApplyTailoredResumeRequest,
     GenerateAndSaveTailoredResumeResponse,
 )
 from app.ai.service import AIService
@@ -717,4 +718,82 @@ def apply_ai_change(
         "resume_id": resume.id,
         "section": section,
         "target_id": request.target_id,
+    }
+
+
+
+@router.post(
+    "/apply-tailored-resume/{resume_id}",
+)
+def apply_tailored_resume(
+    resume_id: int,
+    request: ApplyTailoredResumeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
+
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    if request.summary is not None:
+        profile = db.scalar(
+            select(CandidateProfile).where(
+                CandidateProfile.user_id == current_user.id
+            )
+        )
+
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate profile not found",
+            )
+
+        profile.summary = request.summary
+
+    for project_id, description in request.project_updates.items():
+        project = db.scalar(
+            select(Project).where(
+                Project.id == int(project_id),
+                Project.resume_id == resume.id,
+            )
+        )
+
+        if project is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project {project_id} not found",
+            )
+
+        project.description = description
+
+    for experience_id, description in request.experience_updates.items():
+        experience = db.scalar(
+            select(Experience).where(
+                Experience.id == int(experience_id),
+                Experience.resume_id == resume.id,
+            )
+        )
+
+        if experience is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Experience {experience_id} not found",
+            )
+
+        experience.description = description
+
+    db.commit()
+
+    return {
+        "message": "Tailored resume changes applied successfully",
+        "resume_id": resume.id,
     }
