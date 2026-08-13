@@ -115,3 +115,23 @@ class GenerateAndSaveTailoredResumeResponse(BaseModel):
     version_id: int
     version_number: int
     content: str
+
+
+class TailoredResumeContent(BaseModel):
+    summary: str
+    skills: list[str]
+    experience: list[str]
+    projects: list[str]
+
+
+class TailoredResumeResponse(BaseModel):
+    resume_id: int
+    job_description_id: int
+    content: str
+    structured: TailoredResumeContent | None = None
+
+class ApplyTailoredResumeRequest(BaseModel):
+    summary: str | None = None
+    skill_ids: list[int] = Field(default_factory=list)
+    experience_updates: dict[int, str] = Field(default_factory=dict)
+    project_updates: dict[int, str] = Field(default_factory=dict)
