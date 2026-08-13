@@ -15,6 +15,8 @@ from app.models.project import Project
 from app.models.resume import Resume
 from app.models.experience import Experience
 from app.models.candidate_profile import CandidateProfile
+from app.ai.jd_schemas import JobDescriptionAnalysis
+from app.models.job_description import JobDescription
 
 from app.ai.context_builder import build_resume_ai_context
 from app.ai.schemas import (
@@ -346,4 +348,41 @@ def generate_and_save_resume(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI service is temporarily unavailable",
+        )
+
+
+@router.post(
+    "/analyze-job-description/{job_description_id}",
+    response_model=JobDescriptionAnalysis,
+)
+def analyze_job_description(
+    job_description_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    job_description = db.scalar(
+        select(JobDescription).where(
+            JobDescription.id == job_description_id,
+            JobDescription.user_id == current_user.id,
+        )
+    )
+
+    if job_description is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job description not found",
+        )
+
+    try:
+        return ai_service.analyze_job_description(
+            title=job_description.title,
+            company=job_description.company,
+            description=job_description.description,
+        )
+
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service returned an invalid analysis",
         )

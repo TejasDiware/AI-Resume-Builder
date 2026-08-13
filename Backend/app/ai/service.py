@@ -2,6 +2,13 @@ from app.ai.prompts import (
     PROJECT_IMPROVEMENT_PROMPT,
     RESUME_TEXT_IMPROVEMENT_PROMPT,
 )
+
+import json
+
+from app.ai.jd_schemas import JobDescriptionAnalysis
+from app.ai.prompts import JOB_DESCRIPTION_ANALYSIS_PROMPT
+
+
 from app.ai.provider import LLMProvider
 from app.ai.schemas import (
     ImproveProjectResponse,
@@ -19,6 +26,38 @@ from app.ai.prompts import (
     FULL_RESUME_PROMPT,
 
 )
+
+import json
+import re
+
+
+def parse_json_response(raw_response: str) -> dict:
+    """
+    Parse JSON returned by an LLM.
+
+    Handles both plain JSON and JSON wrapped in markdown fences.
+    """
+    cleaned = raw_response.strip()
+
+    if cleaned.startswith("```"):
+        cleaned = re.sub(
+            r"^```(?:json)?\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"\s*```$",
+            "",
+            cleaned,
+        )
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "AI returned invalid JSON"
+        ) from exc
 
 
 class AIService:
@@ -143,3 +182,26 @@ class AIService:
             resume_id=resume_id,
             content=generated_content,
         )
+
+    def analyze_job_description(
+        self,
+        title: str,
+        company: str | None,
+        description: str,
+    ) -> JobDescriptionAnalysis:
+        prompt = JOB_DESCRIPTION_ANALYSIS_PROMPT.format(
+            title=title,
+            company=company or "",
+            description=description,
+        )
+
+        raw_response = self.provider.generate(prompt)
+
+        try:
+            data = parse_json_response(raw_response)
+            return JobDescriptionAnalysis.model_validate(data)
+
+        except ValueError as exc:
+            raise RuntimeError(
+                "AI returned an invalid job description analysis"
+            ) from exc
