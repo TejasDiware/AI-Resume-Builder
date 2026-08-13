@@ -17,6 +17,7 @@ from app.api.routes.job_description import router as job_description_router
 from app.api.routes.ats import router as ats_router
 from app.api.routes.pdf import router as pdf_router
 from app.api.routes.quality import router as quality_router
+from app.api.routes.dashboard import router as dashboard_router
 
 
 app = FastAPI(
@@ -24,6 +25,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.include_router(
+    dashboard_router,
+    prefix="/api/v1",
+)
 
 app.include_router(
     auth_router,
