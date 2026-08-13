@@ -8,7 +8,6 @@ from app.models.project import Project
 from app.models.certification import Certification
 from app.models.language import Language
 from app.models.achievement import Achievement
-from app.models.resume_version import ResumeVersion
 from app.models.job_description import JobDescription
 from app.models.job_description_analysis import JobDescriptionAnalysis
 
@@ -26,7 +25,6 @@ __all__ = [
     "Certification",
     "Language",
     "Achievement",
-    "ResumeVersion",
     "JobDescription",
     "JobDescriptionAnalysis",
 ]
