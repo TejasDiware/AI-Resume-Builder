@@ -84,3 +84,10 @@ class TailoredResumeResponse(BaseModel):
     resume_id: int
     job_description_id: int
     content: str
+
+class GenerateAndSaveTailoredResumeResponse(BaseModel):
+    resume_id: int
+    job_description_id: int
+    version_id: int
+    version_number: int
+    content: str

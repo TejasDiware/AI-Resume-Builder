@@ -21,6 +21,7 @@ from app.ai.schemas import (
     ImproveTextResponse,
     TailoredResumeRequest,
     TailoredResumeResponse,
+    GenerateAndSaveTailoredResumeResponse,
 )
 from app.ai.service import AIService
 from app.api.dependencies import get_current_user
@@ -556,6 +557,109 @@ def generate_tailored_resume(
             achievements=context["achievements"],
             job_description=job_description.description,
             instruction=request.instruction,
+        )
+
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is temporarily unavailable",
+        )
+
+
+@router.post(
+    "/generate-tailored-resume/{resume_id}/{job_description_id}/save",
+    response_model=GenerateAndSaveTailoredResumeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_and_save_tailored_resume(
+    resume_id: int,
+    job_description_id: int,
+    request: TailoredResumeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
+
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    job_description = db.scalar(
+        select(JobDescription).where(
+            JobDescription.id == job_description_id,
+            JobDescription.user_id == current_user.id,
+        )
+    )
+
+    if job_description is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job description not found",
+        )
+
+    try:
+        context = build_resume_ai_context(
+            resume=resume,
+            current_user=current_user,
+            db=db,
+        )
+
+        tailored = ai_service.generate_tailored_resume(
+            resume_id=resume.id,
+            job_description_id=job_description.id,
+            profile=context["profile"],
+            education=context["education"],
+            experience=context["experience"],
+            skills=context["skills"],
+            projects=context["projects"],
+            certifications=context["certifications"],
+            languages=context["languages"],
+            achievements=context["achievements"],
+            job_description=job_description.description,
+            instruction=request.instruction,
+        )
+
+        next_version = db.scalar(
+            select(
+                func.coalesce(
+                    func.max(ResumeVersion.version_number),
+                    0,
+                ) + 1
+            ).where(
+                ResumeVersion.resume_id == resume.id
+            )
+        )
+
+        version = ResumeVersion(
+            resume_id=resume.id,
+            version_number=next_version,
+            content=tailored.content,
+        )
+
+        db.add(version)
+        db.commit()
+        db.refresh(version)
+
+        return GenerateAndSaveTailoredResumeResponse(
+            resume_id=resume.id,
+            job_description_id=job_description.id,
+            version_id=version.id,
+            version_number=version.version_number,
+            content=version.content,
         )
 
     except ValueError:
