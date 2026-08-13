@@ -157,3 +157,40 @@ Achievements:
 Additional instruction:
 {instruction}
 """
+
+
+JOB_DESCRIPTION_ANALYSIS_PROMPT = """
+You are an expert job-description analyzer.
+
+Analyze the job description below and extract structured information.
+
+STRICT RULES:
+- Extract only information explicitly present in the job description.
+- Do not invent requirements.
+- Do not infer skills that are not stated.
+- Keep technology and skill names close to their original wording.
+- Avoid duplicate skills.
+- Return ONLY valid JSON.
+- Do not include markdown fences.
+- Do not include explanations.
+
+Return exactly this JSON structure:
+
+{{
+  "job_title": "string or null",
+  "required_skills": [],
+  "preferred_skills": [],
+  "experience_requirements": [],
+  "education_requirements": [],
+  "keywords": []
+}}
+
+Job title:
+{title}
+
+Company:
+{company}
+
+Job description:
+{description}
+"""
