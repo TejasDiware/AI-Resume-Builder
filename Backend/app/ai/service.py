@@ -4,7 +4,9 @@ from app.ai.prompts import (
 )
 
 import json
+from app.quality.schemas import AIResumeQualityResponse
 
+from app.ai.prompts import AI_RESUME_QUALITY_PROMPT
 from app.ai.jd_schemas import JobDescriptionAnalysis
 from app.ai.prompts import JOB_DESCRIPTION_ANALYSIS_PROMPT
 from app.ats.schemas import ATSOptimizationResponse
@@ -22,6 +24,7 @@ from app.ai.schemas import (
     ImproveSummaryResponse,
     GeneratedResumeResponse,
     TailoredResumeResponse,
+   
 )
 
 from app.ai.prompts import (
@@ -338,3 +341,49 @@ class AIService:
             job_description_id=job_description_id,
             content=content,
         )
+
+
+
+
+
+    def generate_quality_recommendations(
+        self,
+        resume_id: int,
+        overall_score: float,
+        completeness_score: float,
+        content_quality_score: float,
+        ats_readiness_score: float,
+        sections: str,
+        issues: list[str],
+        resume_context: str,
+    ) -> AIResumeQualityResponse:
+
+        prompt = AI_RESUME_QUALITY_PROMPT.format(
+            overall_score=overall_score,
+            completeness_score=completeness_score,
+            content_quality_score=content_quality_score,
+            ats_readiness_score=ats_readiness_score,
+            sections=sections,
+            issues="\n".join(issues),
+            resume_context=resume_context,
+        )
+
+        raw_response = self.provider.generate(prompt)
+
+        try:
+            data = parse_json_response(raw_response)
+
+            return AIResumeQualityResponse(
+                resume_id=resume_id,
+                overall_score=overall_score,
+                priority=data.get("priority", []),
+                recommendations=data.get(
+                    "recommendations",
+                    [],
+                ),
+            )
+
+        except (ValueError, KeyError) as exc:
+            raise RuntimeError(
+                "AI returned invalid resume quality recommendations"
+            ) from exc
