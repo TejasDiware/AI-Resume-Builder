@@ -12,6 +12,7 @@ from app.api.routes.project import router as project_router
 from app.api.routes.certification import router as certification_router
 from app.api.routes.language import router as language_router
 from app.api.routes.achievement import router as achievement_router
+from app.api.routes.ai import router as ai_router
 
 
 app = FastAPI(
@@ -68,6 +69,11 @@ app.include_router(
 
 app.include_router(
     achievement_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    ai_router,
     prefix="/api/v1",
 )
 
