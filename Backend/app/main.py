@@ -17,6 +17,7 @@ from app.api.routes.resume_version import router as resume_version_router
 from app.api.routes.job_description import router as job_description_router
 from app.api.routes.ats import router as ats_router
 from app.api.routes.pdf import router as pdf_router
+from app.api.routes.quality import router as quality_router
 
 
 app = FastAPI(
@@ -101,6 +102,10 @@ app.include_router(
     prefix="/api/v1",
 )
 
+app.include_router(
+    quality_router,
+    prefix="/api/v1",
+)
 @app.get("/")
 def root():
     return {
