@@ -34,6 +34,13 @@ from app.ai.schemas import (
     ImproveSummaryResponse,
 )
 
+from sqlalchemy import func, select
+
+from app.models.resume_version import ResumeVersion
+from app.ai.schemas import (
+    GenerateAndSaveResumeResponse,
+)
+
 
 router = APIRouter(
     prefix="/ai",
@@ -242,6 +249,91 @@ def generate_resume(
             languages=context["languages"],
             achievements=context["achievements"],
             instruction=request.instruction,
+        )
+
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is temporarily unavailable",
+        )
+
+@router.post(
+    "/generate-resume/{resume_id}/save",
+    response_model=GenerateAndSaveResumeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_and_save_resume(
+    resume_id: int,
+    request: GenerateResumeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
+
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    try:
+        context = build_resume_ai_context(
+            resume=resume,
+            current_user=current_user,
+            db=db,
+        )
+
+        generated = ai_service.generate_resume(
+            resume_id=resume.id,
+            profile=context["profile"],
+            education=context["education"],
+            experience=context["experience"],
+            skills=context["skills"],
+            projects=context["projects"],
+            certifications=context["certifications"],
+            languages=context["languages"],
+            achievements=context["achievements"],
+            instruction=request.instruction,
+        )
+
+        next_version = db.scalar(
+            select(
+                func.coalesce(
+                    func.max(ResumeVersion.version_number),
+                    0,
+                ) + 1
+            ).where(
+                ResumeVersion.resume_id == resume.id
+            )
+        )
+
+        version = ResumeVersion(
+            resume_id=resume.id,
+            version_number=next_version,
+            content=generated.content,
+        )
+
+        db.add(version)
+        db.commit()
+        db.refresh(version)
+
+        return GenerateAndSaveResumeResponse(
+            resume_id=resume.id,
+            version_id=version.id,
+            version_number=version.version_number,
+            content=version.content,
         )
 
     except ValueError:

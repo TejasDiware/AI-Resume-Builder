@@ -62,3 +62,10 @@ class GenerateResumeRequest(BaseModel):
 class GeneratedResumeResponse(BaseModel):
     resume_id: int
     content: str       
+
+
+class GenerateAndSaveResumeResponse(BaseModel):
+    resume_id: int
+    version_id: int
+    version_number: int
+    content: str

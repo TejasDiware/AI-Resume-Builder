@@ -16,6 +16,7 @@ from app.models.project import Project
 from app.models.certification import Certification
 from app.models.language import Language
 from app.models.achievement import Achievement
+from app.models.resume_version import ResumeVersion
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
