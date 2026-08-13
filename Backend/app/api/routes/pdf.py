@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
+from app.ai.context_builder import build_resume_ai_context
 from app.database.session import get_db
 from app.models.resume import Resume
-from app.models.resume_version import ResumeVersion
 from app.models.user import User
 from app.pdf.generator import generate_resume_pdf
 
@@ -18,11 +18,10 @@ router = APIRouter(
 
 
 @router.get(
-    "/{resume_id}/versions/{version_id}/pdf",
+    "/{resume_id}/pdf",
 )
 def download_resume_pdf(
     resume_id: int,
-    version_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -39,30 +38,43 @@ def download_resume_pdf(
             detail="Resume not found",
         )
 
-    version = db.scalar(
-        select(ResumeVersion).where(
-            ResumeVersion.id == version_id,
-            ResumeVersion.resume_id == resume_id,
+    try:
+        context = build_resume_ai_context(
+            resume=resume,
+            current_user=current_user,
+            db=db,
         )
-    )
 
-    if version is None:
+        content = "\n\n".join(
+            [
+                context["profile"],
+                context["experience"],
+                context["education"],
+                context["skills"],
+                context["projects"],
+                context["certifications"],
+                context["languages"],
+                context["achievements"],
+            ]
+        )
+
+        pdf_buffer, filename = generate_resume_pdf(
+            content=content,
+            filename=f"resume_{resume.id}.pdf",
+        )
+
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{filename}"'
+                )
+            },
+        )
+
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Resume version not found",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         )
-
-    pdf_buffer, filename = generate_resume_pdf(
-        content=version.content,
-        filename=f"resume_v{version.version_number}.pdf",
-    )
-
-    return StreamingResponse(
-        pdf_buffer,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{filename}"'
-            )
-        },
-    )

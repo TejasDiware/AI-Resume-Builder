@@ -107,11 +107,6 @@ class Resume(Base):
     cascade="all, delete-orphan",
 )
 
-    versions = relationship(
-    "ResumeVersion",
-    back_populates="resume",
-    cascade="all, delete-orphan",
-    order_by="ResumeVersion.version_number.desc()",
-)
+    
 
    
