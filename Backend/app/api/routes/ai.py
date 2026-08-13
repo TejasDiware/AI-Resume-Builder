@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.context_builder import build_resume_ai_context
 from app.ai.jd_schemas import JobDescriptionAnalysis
+from app.ai.schemas import ApplyAIChangeRequest
 from app.ai.provider import GroqProvider
 from app.ai.schemas import (
     GenerateAndSaveResumeResponse,
@@ -487,3 +488,110 @@ def generate_tailored_resume(
         )
 
 
+
+
+
+@router.post(
+    "/apply-change/{resume_id}",
+    status_code=status.HTTP_200_OK,
+)
+def apply_ai_change(
+    resume_id: int,
+    request: ApplyAIChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
+
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    section = request.section
+
+    if section == "summary":
+        profile = db.scalar(
+            select(CandidateProfile).where(
+                CandidateProfile.user_id == current_user.id
+            )
+        )
+
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate profile not found",
+            )
+
+        profile.summary = request.content
+
+    elif section == "experience":
+        if request.target_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_id is required for experience",
+            )
+
+        experience = db.scalar(
+            select(Experience)
+            .join(
+                Resume,
+                Experience.resume_id == Resume.id,
+            )
+            .where(
+                Experience.id == request.target_id,
+                Experience.resume_id == resume.id,
+                Resume.user_id == current_user.id,
+            )
+        )
+
+        if experience is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Experience not found",
+            )
+
+        experience.description = request.content
+
+    elif section == "project":
+        if request.target_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_id is required for project",
+            )
+
+        project = db.scalar(
+            select(Project)
+            .join(
+                Resume,
+                Project.resume_id == Resume.id,
+            )
+            .where(
+                Project.id == request.target_id,
+                Project.resume_id == resume.id,
+                Resume.user_id == current_user.id,
+            )
+        )
+
+        if project is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+
+        project.description = request.content
+
+    db.commit()
+
+    return {
+        "message": "AI change applied successfully",
+        "resume_id": resume.id,
+        "section": section,
+        "target_id": request.target_id,
+    }
