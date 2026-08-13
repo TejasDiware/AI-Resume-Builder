@@ -17,11 +17,10 @@ router = APIRouter(
 )
 
 
-@router.get(
-    "/{resume_id}/pdf",
-)
+@router.get("/{resume_id}/pdf")
 def download_resume_pdf(
     resume_id: int,
+    template: str = "classic",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -60,7 +59,8 @@ def download_resume_pdf(
 
         pdf_buffer, filename = generate_resume_pdf(
             content=content,
-            filename=f"resume_{resume.id}.pdf",
+            filename=f"resume_{resume.id}_{template}.pdf",
+            template=template,
         )
 
         return Response(
@@ -69,7 +69,7 @@ def download_resume_pdf(
             headers={
                 "Content-Disposition": (
                     f'attachment; filename="{filename}"'
-                )
+                ),
             },
         )
 
