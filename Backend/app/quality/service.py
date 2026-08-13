@@ -13,60 +13,143 @@ def calculate_resume_quality(
     education: str,
 ) -> ResumeQualityResponse:
 
-    summary_score = 100.0 if summary.strip() else 0.0
-    experience_score = 100.0 if experience.strip() else 0.0
-    skills_score = 100.0 if skills.strip() else 0.0
-    projects_score = 100.0 if projects.strip() else 0.0
-    education_score = 100.0 if education.strip() else 0.0
+    issues: list[str] = []
+    recommendations: list[str] = []
 
-    section_values = [
-        summary_score,
-        experience_score,
-        skills_score,
-        projects_score,
-        education_score,
-    ]
+    # ---------------------------------------------------------
+    # Summary
+    # ---------------------------------------------------------
+    summary_length = len(summary.strip())
 
-    completeness_score = round(
-        sum(section_values) / len(section_values),
-        2,
-    )
-
-    issues = []
-    recommendations = []
-
-    if not summary.strip():
+    if summary_length == 0:
+        summary_score = 0.0
         issues.append("Professional summary is missing.")
         recommendations.append(
-            "Add a concise professional summary."
+            "Add a concise professional summary tailored to your target role."
         )
+    elif summary_length < 80:
+        summary_score = 60.0
+        issues.append("Professional summary is too short.")
+        recommendations.append(
+            "Expand the summary with your role, core technologies, and strengths."
+        )
+    elif summary_length > 600:
+        summary_score = 75.0
+        issues.append("Professional summary is too long.")
+        recommendations.append(
+            "Keep the summary concise and focused on relevant strengths."
+        )
+    else:
+        summary_score = 100.0
+
+    # ---------------------------------------------------------
+    # Experience
+    # ---------------------------------------------------------
+    experience_bullets = sum(
+        1
+        for line in experience.splitlines()
+        if line.strip().startswith("-")
+    )
 
     if not experience.strip():
+        experience_score = 0.0
         issues.append("Experience section is missing.")
         recommendations.append(
-            "Add relevant work experience or internships."
+            "Add relevant work experience, internships, or practical experience."
         )
+    elif experience_bullets == 0:
+        experience_score = 60.0
+        issues.append("Experience has no bullet-point achievements.")
+        recommendations.append(
+            "Break experience descriptions into clear achievement-focused bullets."
+        )
+    elif experience_bullets < 2:
+        experience_score = 75.0
+        issues.append("Experience section has very few bullet points.")
+        recommendations.append(
+            "Add more relevant responsibilities and achievements."
+        )
+    else:
+        experience_score = 100.0
 
-    if not skills.strip():
+    # ---------------------------------------------------------
+    # Skills
+    # ---------------------------------------------------------
+    skill_lines = [
+        line.strip()
+        for line in skills.splitlines()
+        if line.strip()
+    ]
+
+    if not skill_lines:
+        skills_score = 0.0
         issues.append("Skills section is missing.")
         recommendations.append(
-            "Add your relevant technical and professional skills."
+            "Add the technical and professional skills you genuinely possess."
         )
+    elif len(skill_lines) < 3:
+        skills_score = 70.0
+        issues.append("Skills section contains very few skills.")
+        recommendations.append(
+            "Add more relevant skills that accurately represent your experience."
+        )
+    else:
+        skills_score = 100.0
+
+    # ---------------------------------------------------------
+    # Projects
+    # ---------------------------------------------------------
+    project_bullets = sum(
+        1
+        for line in projects.splitlines()
+        if line.strip().startswith("-")
+    )
 
     if not projects.strip():
+        projects_score = 0.0
         issues.append("Projects section is missing.")
         recommendations.append(
-            "Add relevant projects with technologies actually used."
+            "Add relevant projects with technologies and your contribution."
         )
+    elif project_bullets == 0:
+        projects_score = 60.0
+        issues.append("Project descriptions lack bullet points.")
+        recommendations.append(
+            "Describe project work using concise bullet points."
+        )
+    elif project_bullets < 2:
+        projects_score = 75.0
+        issues.append("Projects have limited detail.")
+        recommendations.append(
+            "Add more detail about your technical contribution and results."
+        )
+    else:
+        projects_score = 100.0
 
-    if not education.strip():
+    # ---------------------------------------------------------
+    # Education
+    # ---------------------------------------------------------
+    education_length = len(education.strip())
+
+    if education_length == 0:
+        education_score = 0.0
         issues.append("Education section is missing.")
         recommendations.append(
-            "Add your education details."
+            "Add your degree, institution, and relevant education details."
         )
+    elif education_length < 50:
+        education_score = 75.0
+        issues.append("Education section contains limited information.")
+        recommendations.append(
+            "Include your degree, institution, field of study, and dates."
+        )
+    else:
+        education_score = 100.0
 
-    # Initial deterministic content-quality heuristic.
-    content_quality_score = round(
+    # ---------------------------------------------------------
+    # Completeness
+    # ---------------------------------------------------------
+    completeness_score = round(
         (
             summary_score
             + experience_score
@@ -77,14 +160,34 @@ def calculate_resume_quality(
         2,
     )
 
-    ats_readiness_score = round(
+    # ---------------------------------------------------------
+    # Content quality
+    # ---------------------------------------------------------
+    content_quality_score = round(
         (
-            completeness_score * 0.6
-            + content_quality_score * 0.4
+            summary_score * 0.20
+            + experience_score * 0.25
+            + skills_score * 0.15
+            + projects_score * 0.25
+            + education_score * 0.15
         ),
         2,
     )
 
+    # ---------------------------------------------------------
+    # ATS readiness
+    # ---------------------------------------------------------
+    ats_readiness_score = round(
+        (
+            completeness_score * 0.60
+            + content_quality_score * 0.40
+        ),
+        2,
+    )
+
+    # ---------------------------------------------------------
+    # Overall score
+    # ---------------------------------------------------------
     overall_score = round(
         (
             completeness_score * 0.35
@@ -96,7 +199,7 @@ def calculate_resume_quality(
 
     if not issues:
         recommendations.append(
-            "Your resume has a strong baseline structure. "
+            "Your resume has a strong structural foundation. "
             "Use the ATS optimizer for job-specific improvements."
         )
 
@@ -115,4 +218,41 @@ def calculate_resume_quality(
         ),
         issues=issues,
         recommendations=recommendations,
+    )
+
+
+
+def text_length_score(
+    text: str,
+    minimum: int,
+    maximum: int,
+) -> float:
+    length = len(text.strip())
+
+    if length == 0:
+        return 0.0
+
+    if minimum <= length <= maximum:
+        return 100.0
+
+    if length < minimum:
+        return round(
+            (length / minimum) * 100,
+            2,
+        )
+
+    return round(
+        max(
+            0.0,
+            100 - ((length - maximum) / maximum) * 100,
+        ),
+        2,
+    )
+
+
+def bullet_count(text: str) -> int:
+    return sum(
+        1
+        for line in text.splitlines()
+        if line.strip().startswith("-")
     )
