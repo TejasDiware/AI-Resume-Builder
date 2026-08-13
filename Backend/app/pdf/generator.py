@@ -2,18 +2,20 @@ from io import BytesIO
 import html
 import re
 
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import (
+    ParagraphStyle,
+    getSampleStyleSheet,
+)
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    KeepTogether,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
 )
 
-from app.pdf.templates import CLASSIC_TEMPLATE
+from app.pdf.templates import TEMPLATES
 
 
 SECTION_HEADINGS = {
@@ -32,8 +34,8 @@ SECTION_HEADINGS = {
 
 def normalize_text(text: str) -> str:
     """
-    Normalize Unicode characters so the default ReportLab fonts
-    produce clean, readable PDF text.
+    Normalize Unicode characters so ReportLab's built-in fonts
+    produce clean and readable PDF text.
     """
 
     replacements = {
@@ -57,7 +59,7 @@ def normalize_text(text: str) -> str:
         "\u25aa": "-",   # small square
         "\u25e6": "-",   # white bullet
 
-        "\u2192": "->",  # right arrow
+        "\u2192": "->",  # arrow
         "\u00a0": " ",   # non-breaking space
         "\u202f": " ",   # narrow no-break space
         "\u200b": "",    # zero-width space
@@ -68,8 +70,6 @@ def normalize_text(text: str) -> str:
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    # Remove control characters.
-    # Keep newline and tab, remove DEL (0x7F) and other controls.
     cleaned_chars = []
 
     for char in text:
@@ -80,7 +80,7 @@ def normalize_text(text: str) -> str:
         elif 32 <= code < 127:
             cleaned_chars.append(char)
         else:
-            # Ignore unsupported non-ASCII/control characters
+            # Replace unsupported characters with a normal space.
             cleaned_chars.append(" ")
 
     text = "".join(cleaned_chars)
@@ -92,7 +92,10 @@ def normalize_text(text: str) -> str:
 
 
 def clean_markdown(text: str) -> str:
-    """Convert common Markdown formatting into safe resume text."""
+    """
+    Convert common Markdown formatting into
+    ReportLab-safe resume text.
+    """
 
     text = normalize_text(text)
     text = html.escape(text)
@@ -115,6 +118,10 @@ def clean_markdown(text: str) -> str:
         text,
     )
 
+    # Markdown horizontal rule
+    if re.fullmatch(r"-{3,}", text.strip()):
+        return ""
+
     # Bullets
     text = re.sub(
         r"^\s*[-*•]\s+",
@@ -122,21 +129,15 @@ def clean_markdown(text: str) -> str:
         text,
     )
 
-    # Remove markdown horizontal rules.
-    if re.fullmatch(r"-{3,}", text.strip()):
-        return ""
-
-    # Normalize bullets.
-    text = re.sub(
-        r"^\s*[-*]\s+",
-        "- ",
-        text,
+    # Normalize escaped URLs
+    text = text.replace(
+        r"\https://",
+        "https://",
     )
-
-
-    # Fix escaped URLs.
-    text = text.replace(r"\https://", "https://")
-    text = text.replace(r"\http://", "http://")
+    text = text.replace(
+        r"\http://",
+        "http://",
+    )
 
     return text.strip()
 
@@ -144,13 +145,29 @@ def clean_markdown(text: str) -> str:
 def generate_resume_pdf(
     content: str,
     filename: str = "resume.pdf",
+    template: str = "classic",
 ) -> tuple[BytesIO, str]:
     """
-    Generate a professional single-column resume PDF.
+    Generate a resume PDF using the selected template.
+
+    Supported templates:
+    - classic
+    - modern
+    - professional
     """
 
     if not content or not content.strip():
         raise ValueError("Resume content is empty")
+
+    template_name = template.strip().lower()
+
+    if template_name not in TEMPLATES:
+        raise ValueError(
+            "Unsupported template. "
+            "Use classic, modern, or professional."
+        )
+
+    template_config = TEMPLATES[template_name]
 
     buffer = BytesIO()
 
@@ -167,53 +184,56 @@ def generate_resume_pdf(
 
     styles = getSampleStyleSheet()
 
+    # ---------------------------------------------------------
+    # Template-specific configuration
+    # ---------------------------------------------------------
+
+    title_alignment = (
+        TA_CENTER
+        if template_config.get("title_alignment") == "center"
+        else TA_LEFT
+    )
+
+    # ---------------------------------------------------------
+    # Styles
+    # ---------------------------------------------------------
+
     title_style = ParagraphStyle(
         "ResumeTitle",
         parent=styles["Title"],
-        fontName=CLASSIC_TEMPLATE["font_name"],
-        fontSize=22,
+        fontName=template_config["font_name"],
+        fontSize=template_config["title_size"],
         leading=25,
-        alignment=TA_CENTER,
+        alignment=title_alignment,
         spaceAfter=4,
     )
 
     contact_style = ParagraphStyle(
         "ResumeContact",
         parent=styles["BodyText"],
-        fontName=CLASSIC_TEMPLATE["font_name"],
+        fontName=template_config["font_name"],
         fontSize=9,
         leading=12,
-        alignment=TA_CENTER,
+        alignment=title_alignment,
         spaceAfter=3,
     )
 
     section_style = ParagraphStyle(
         "ResumeSection",
         parent=styles["Heading2"],
-        fontName=CLASSIC_TEMPLATE["font_name"],
-        fontSize=12,
+        fontName=template_config["font_name"],
+        fontSize=template_config["heading_size"],
         leading=15,
         spaceBefore=10,
         spaceAfter=4,
         keepWithNext=True,
     )
 
-    subheading_style = ParagraphStyle(
-        "ResumeSubheading",
-        parent=styles["BodyText"],
-        fontName=CLASSIC_TEMPLATE["font_name"],
-        fontSize=10.5,
-        leading=13,
-        spaceBefore=3,
-        spaceAfter=2,
-        keepWithNext=True,
-    )
-
     body_style = ParagraphStyle(
         "ResumeBody",
         parent=styles["BodyText"],
-        fontName=CLASSIC_TEMPLATE["font_name"],
-        fontSize=9.5,
+        fontName=template_config["font_name"],
+        fontSize=template_config["body_size"],
         leading=12.5,
         spaceAfter=3,
     )
@@ -231,13 +251,18 @@ def generate_resume_pdf(
     lines = content.splitlines()
 
     first_content_found = False
-    current_section = None
+
+    # ---------------------------------------------------------
+    # Build PDF content
+    # ---------------------------------------------------------
 
     for raw_line in lines:
         line = raw_line.strip()
 
         if not line:
-            story.append(Spacer(1, 2))
+            story.append(
+                Spacer(1, 2)
+            )
             continue
 
         is_markdown_heading = line.startswith("#")
@@ -249,9 +274,10 @@ def generate_resume_pdf(
 
         lower_cleaned = cleaned.lower().strip()
 
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
         # Candidate name
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
+
         if not first_content_found:
             story.append(
                 Paragraph(
@@ -259,18 +285,18 @@ def generate_resume_pdf(
                     title_style,
                 )
             )
+
             first_content_found = True
             continue
 
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
         # Section heading
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
+
         if (
             is_markdown_heading
             or lower_cleaned in SECTION_HEADINGS
         ):
-            current_section = lower_cleaned
-
             story.append(
                 Spacer(1, 2)
             )
@@ -284,21 +310,10 @@ def generate_resume_pdf(
 
             continue
 
-        # ---------------------------------------------------------
-        # Bullet
-        # ---------------------------------------------------------
-        if cleaned.startswith("- "):
-            story.append(
-                Paragraph(
-                    f"- {html.escape(cleaned[2:])}",
-                    bullet_style,
-                )
-            )
-            continue
+        # -----------------------------------------------------
+        # Contact information
+        # -----------------------------------------------------
 
-        # ---------------------------------------------------------
-        # Contact line
-        # ---------------------------------------------------------
         if any(
             marker in cleaned.lower()
             for marker in (
@@ -316,18 +331,39 @@ def generate_resume_pdf(
             )
             continue
 
-        # ---------------------------------------------------------
-        # Body content
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
+        # Bullet
+        # -----------------------------------------------------
+
+        if cleaned.startswith("- "):
+            bullet_text = html.escape(
+                cleaned[2:].strip()
+            )
+
+            story.append(
+                Paragraph(
+                    f"- {bullet_text}",
+                    bullet_style,
+                )
+            )
+
+            continue
+
+        # -----------------------------------------------------
+        # Normal body text
+        # -----------------------------------------------------
+
         story.append(
             Paragraph(
-                cleaned,
+                html.escape(cleaned),
                 body_style,
             )
         )
 
     if not story:
-        raise ValueError("No resume content could be rendered")
+        raise ValueError(
+            "No resume content could be rendered"
+        )
 
     document.build(story)
 
