@@ -10,6 +10,11 @@ class ApplyAIChangeRequest(BaseModel):
         "summary",
         "experience",
         "project",
+        "skill",
+        "education",
+        "certification",
+        "language",
+        "achievement",
     ]
 
     target_id: int | None = None
