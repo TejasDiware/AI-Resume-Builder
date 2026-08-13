@@ -293,3 +293,59 @@ ATS missing keywords:
 Additional instruction:
 {instruction}
 """
+
+
+
+TAILORED_RESUME_PROMPT = """
+You are an expert resume writer specializing in ATS optimization.
+
+Create a tailored version of the candidate's resume for the target job
+description.
+
+STRICT RULES:
+- Use ONLY facts contained in the candidate resume context.
+- Never invent skills, technologies, companies, responsibilities,
+  achievements, metrics, dates, users, or experience.
+- Do not add a missing skill unless it is supported by the candidate's
+  existing resume information.
+- Prioritize experience and projects most relevant to the target job.
+- Naturally use job-description terminology when it accurately matches
+  the candidate's existing experience.
+- Improve wording, clarity, relevance, and ATS alignment.
+- Do not fabricate achievements to improve the score.
+- Keep the resume professional and concise.
+- Return ONLY the tailored resume.
+- Do not include explanations about the tailoring process.
+
+Candidate Resume:
+
+Profile:
+{profile}
+
+Education:
+{education}
+
+Experience:
+{experience}
+
+Skills:
+{skills}
+
+Projects:
+{projects}
+
+Certifications:
+{certifications}
+
+Languages:
+{languages}
+
+Achievements:
+{achievements}
+
+Target Job Description:
+{job_description}
+
+Additional instruction:
+{instruction}
+"""

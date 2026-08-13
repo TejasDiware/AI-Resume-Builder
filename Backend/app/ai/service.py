@@ -21,6 +21,7 @@ from app.ai.schemas import (
     ImproveExperienceResponse,
     ImproveSummaryResponse,
     GeneratedResumeResponse,
+    TailoredResumeResponse,
 )
 
 from app.ai.prompts import (
@@ -29,6 +30,7 @@ from app.ai.prompts import (
     RESUME_TEXT_IMPROVEMENT_PROMPT,
     SUMMARY_IMPROVEMENT_PROMPT,
     FULL_RESUME_PROMPT,
+    TAILORED_RESUME_PROMPT,
 
 )
 
@@ -298,3 +300,41 @@ class AIService:
             raise RuntimeError(
                 "AI returned an invalid section optimization response"
             ) from exc
+
+
+    def generate_tailored_resume(
+        self,
+        resume_id: int,
+        job_description_id: int,
+        profile: str,
+        education: str,
+        experience: str,
+        skills: str,
+        projects: str,
+        certifications: str,
+        languages: str,
+        achievements: str,
+        job_description: str,
+        instruction: str | None,
+    ) -> TailoredResumeResponse:
+
+        prompt = TAILORED_RESUME_PROMPT.format(
+            profile=profile,
+            education=education,
+            experience=experience,
+            skills=skills,
+            projects=projects,
+            certifications=certifications,
+            languages=languages,
+            achievements=achievements,
+            job_description=job_description,
+            instruction=instruction or "",
+        )
+
+        content = self.provider.generate(prompt)
+
+        return TailoredResumeResponse(
+            resume_id=resume_id,
+            job_description_id=job_description_id,
+            content=content,
+        )

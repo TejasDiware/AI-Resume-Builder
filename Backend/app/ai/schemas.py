@@ -69,3 +69,18 @@ class GenerateAndSaveResumeResponse(BaseModel):
     version_id: int
     version_number: int
     content: str
+
+
+
+
+class TailoredResumeRequest(BaseModel):
+    instruction: str | None = Field(
+        default=None,
+        max_length=2000,
+    )
+
+
+class TailoredResumeResponse(BaseModel):
+    resume_id: int
+    job_description_id: int
+    content: str
