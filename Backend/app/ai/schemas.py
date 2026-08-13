@@ -1,5 +1,24 @@
 from pydantic import BaseModel, Field
 
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class ApplyAIChangeRequest(BaseModel):
+    section: Literal[
+        "summary",
+        "experience",
+        "project",
+    ]
+
+    target_id: int | None = None
+
+    content: str = Field(
+        min_length=1,
+        max_length=10000,
+    )
+
 
 class ImproveTextRequest(BaseModel):
     text: str = Field(
