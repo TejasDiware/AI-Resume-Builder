@@ -1,46 +1,38 @@
-from fastapi import APIRouter, Depends
+import json
 
-from app.ai.provider import MockLLMProvider
-from app.ai.schemas import ImproveTextRequest, ImproveTextResponse
-from app.ai.service import AIService
-from app.api.dependencies import get_current_user
-from app.models.user import User
-from app.ai.provider import GroqProvider
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.database.session import get_db
-from app.models.project import Project
-from app.models.resume import Resume
-from app.models.experience import Experience
-from app.models.candidate_profile import CandidateProfile
-from app.ai.jd_schemas import JobDescriptionAnalysis
-from app.models.job_description import JobDescription
-
 from app.ai.context_builder import build_resume_ai_context
+from app.ai.jd_schemas import JobDescriptionAnalysis
+from app.ai.provider import GroqProvider
 from app.ai.schemas import (
+    GenerateAndSaveResumeResponse,
     GenerateResumeRequest,
     GeneratedResumeResponse,
-)
-from app.models.resume import Resume
-
-from app.ai.schemas import (
     ImproveExperienceRequest,
     ImproveExperienceResponse,
     ImproveProjectRequest,
     ImproveProjectResponse,
-    ImproveTextRequest,
-    ImproveTextResponse,
     ImproveSummaryRequest,
     ImproveSummaryResponse,
+    ImproveTextRequest,
+    ImproveTextResponse,
 )
-
-from sqlalchemy import func, select
-
+from app.ai.service import AIService
+from app.api.dependencies import get_current_user
+from app.database.session import get_db
+from app.models.candidate_profile import CandidateProfile
+from app.models.experience import Experience
+from app.models.job_description import JobDescription
+from app.models.job_description_analysis import JobDescriptionAnalysis
+from app.models.project import Project
+from app.models.resume import Resume
 from app.models.resume_version import ResumeVersion
-from app.ai.schemas import (
-    GenerateAndSaveResumeResponse,
+from app.models.user import User
+from app.schemas.job_description_analysis import (
+    JobDescriptionAnalysisResponse,
 )
 
 
@@ -353,7 +345,7 @@ def generate_and_save_resume(
 
 @router.post(
     "/analyze-job-description/{job_description_id}",
-    response_model=JobDescriptionAnalysis,
+    response_model=JobDescriptionAnalysisResponse,
 )
 def analyze_job_description(
     job_description_id: int,
@@ -375,10 +367,73 @@ def analyze_job_description(
         )
 
     try:
-        return ai_service.analyze_job_description(
+        analysis = ai_service.analyze_job_description(
             title=job_description.title,
             company=job_description.company,
             description=job_description.description,
+        )
+
+        existing_analysis = db.scalar(
+            select(JobDescriptionAnalysis).where(
+                JobDescriptionAnalysis.job_description_id
+                == job_description.id
+            )
+        )
+
+        analysis_data = {
+            "job_description_id": job_description.id,
+            "job_title": analysis.job_title,
+            "required_skills": json.dumps(
+                analysis.required_skills
+            ),
+            "preferred_skills": json.dumps(
+                analysis.preferred_skills
+            ),
+            "experience_requirements": json.dumps(
+                analysis.experience_requirements
+            ),
+            "education_requirements": json.dumps(
+                analysis.education_requirements
+            ),
+            "keywords": json.dumps(
+                analysis.keywords
+            ),
+        }
+
+        if existing_analysis:
+            for field, value in analysis_data.items():
+                if field != "job_description_id":
+                    setattr(existing_analysis, field, value)
+        else:
+            existing_analysis = JobDescriptionAnalysis(
+                **analysis_data
+            )
+            db.add(existing_analysis)
+
+        db.commit()
+        db.refresh(existing_analysis)
+
+        return JobDescriptionAnalysisResponse(
+            id=existing_analysis.id,
+            job_description_id=existing_analysis.job_description_id,
+            job_title=existing_analysis.job_title,
+            required_skills=json.loads(
+                existing_analysis.required_skills or "[]"
+            ),
+            preferred_skills=json.loads(
+                existing_analysis.preferred_skills or "[]"
+            ),
+            experience_requirements=json.loads(
+                existing_analysis.experience_requirements or "[]"
+            ),
+            education_requirements=json.loads(
+                existing_analysis.education_requirements or "[]"
+            ),
+            keywords=json.loads(
+                existing_analysis.keywords or "[]"
+            ),
+            created_at=existing_analysis.created_at,
+            updated_at=existing_analysis.updated_at,
         )
 
     except RuntimeError:
@@ -386,3 +441,55 @@ def analyze_job_description(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI service returned an invalid analysis",
         )
+
+@router.get(
+    "/job-description-analysis/{job_description_id}",
+    response_model=JobDescriptionAnalysisResponse,
+)
+def get_job_description_analysis(
+    job_description_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    analysis = db.scalar(
+        select(JobDescriptionAnalysis)
+        .join(
+            JobDescription,
+            JobDescriptionAnalysis.job_description_id
+            == JobDescription.id,
+        )
+        .where(
+            JobDescriptionAnalysis.job_description_id
+            == job_description_id,
+            JobDescription.user_id == current_user.id,
+        )
+    )
+
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job description analysis not found",
+        )
+
+    return JobDescriptionAnalysisResponse(
+        id=analysis.id,
+        job_description_id=analysis.job_description_id,
+        job_title=analysis.job_title,
+        required_skills=json.loads(
+            analysis.required_skills or "[]"
+        ),
+        preferred_skills=json.loads(
+            analysis.preferred_skills or "[]"
+        ),
+        experience_requirements=json.loads(
+            analysis.experience_requirements or "[]"
+        ),
+        education_requirements=json.loads(
+            analysis.education_requirements or "[]"
+        ),
+        keywords=json.loads(
+            analysis.keywords or "[]"
+        ),
+        created_at=analysis.created_at,
+        updated_at=analysis.updated_at,
+    )

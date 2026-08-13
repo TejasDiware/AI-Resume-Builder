@@ -52,3 +52,10 @@ class JobDescription(Base):
         "User",
         back_populates="job_descriptions",
     )
+
+    analysis = relationship(
+    "JobDescriptionAnalysis",
+    back_populates="job_description",
+    cascade="all, delete-orphan",
+    uselist=False,
+)

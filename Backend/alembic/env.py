@@ -18,6 +18,7 @@ from app.models.language import Language
 from app.models.achievement import Achievement
 from app.models.resume_version import ResumeVersion
 from app.models.job_description import JobDescription
+from app.models.job_description_analysis import JobDescriptionAnalysis
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
