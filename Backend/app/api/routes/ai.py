@@ -4,17 +4,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ai.context_builder import build_resume_ai_context
+from app.ai.context_builder import (
+    build_resume_ai_context,
+    build_resume_generation_context,
+)
+
 from app.ai.jd_schemas import JobDescriptionAnalysis
-from app.ai.schemas import ApplyAIChangeRequest
+
 from app.ai.provider import GroqProvider
-from app.models.skill import Skill
-from app.models.education import Education
-from app.models.certification import Certification
-from app.models.language import Language
-from app.models.achievement import Achievement
+
 from app.ai.schemas import (
+    ApplyAIChangeRequest,
+    ApplyTailoredResumeRequest,
     GenerateAndSaveResumeResponse,
+    GenerateAndSaveTailoredResumeResponse,
     GenerateResumeRequest,
     GeneratedResumeResponse,
     ImproveExperienceRequest,
@@ -27,19 +30,29 @@ from app.ai.schemas import (
     ImproveTextResponse,
     TailoredResumeRequest,
     TailoredResumeResponse,
-    ApplyTailoredResumeRequest,
-    GenerateAndSaveTailoredResumeResponse,
 )
+
 from app.ai.service import AIService
+
 from app.api.dependencies import get_current_user
+
 from app.database.session import get_db
+
+from app.models.achievement import Achievement
 from app.models.candidate_profile import CandidateProfile
+from app.models.certification import Certification
+from app.models.education import Education
 from app.models.experience import Experience
 from app.models.job_description import JobDescription
-from app.models.job_description_analysis import JobDescriptionAnalysis
+from app.models.job_description_analysis import (
+    JobDescriptionAnalysis,
+)
+from app.models.language import Language
 from app.models.project import Project
 from app.models.resume import Resume
+from app.models.skill import Skill
 from app.models.user import User
+
 from app.schemas.job_description_analysis import (
     JobDescriptionAnalysisResponse,
 )
@@ -235,30 +248,25 @@ def generate_resume(
         )
 
     try:
-        context = build_resume_ai_context(
-            resume=resume,
-            current_user=current_user,
-            db=db,
+        generation_context = (
+            build_resume_generation_context(
+                resume=resume,
+                current_user=current_user,
+                db=db,
+            )
         )
 
         return ai_service.generate_resume(
             resume_id=resume.id,
-            profile=context["profile"],
-            education=context["education"],
-            experience=context["experience"],
-            skills=context["skills"],
-            projects=context["projects"],
-            certifications=context["certifications"],
-            languages=context["languages"],
-            achievements=context["achievements"],
+            generation_context=generation_context,
             instruction=request.instruction,
         )
 
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Resume not found",
-        )
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     except RuntimeError:
         raise HTTPException(
@@ -460,32 +468,27 @@ def generate_tailored_resume(
         )
 
     try:
-        context = build_resume_ai_context(
-            resume=resume,
-            current_user=current_user,
-            db=db,
+        generation_context = (
+            build_resume_generation_context(
+                resume=resume,
+                current_user=current_user,
+                db=db,
+            )
         )
 
         return ai_service.generate_tailored_resume(
             resume_id=resume.id,
             job_description_id=job_description.id,
-            profile=context["profile"],
-            education=context["education"],
-            experience=context["experience"],
-            skills=context["skills"],
-            projects=context["projects"],
-            certifications=context["certifications"],
-            languages=context["languages"],
-            achievements=context["achievements"],
+            generation_context=generation_context,
             job_description=job_description.description,
             instruction=request.instruction,
         )
 
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Resume not found",
-        )
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     except RuntimeError:
         raise HTTPException(
@@ -520,205 +523,216 @@ def apply_ai_change(
             detail="Resume not found",
         )
 
-    section = request.section
+    try:
+        section = request.section
 
-    if section == "summary":
-        profile = db.scalar(
-            select(CandidateProfile).where(
-                CandidateProfile.user_id == current_user.id
-            )
-        )
-
-        if profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Candidate profile not found",
+        if section == "summary":
+            profile = db.scalar(
+                select(CandidateProfile).where(
+                    CandidateProfile.user_id
+                    == current_user.id
+                )
             )
 
-        profile.summary = request.content
+            if profile is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Candidate profile not found",
+                )
 
+            profile.summary = request.content
 
-    elif section == "experience":
-        if request.target_id is None:
+        elif section == "experience":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for experience",
+                )
+
+            experience = db.scalar(
+                select(Experience)
+                .join(
+                    Resume,
+                    Experience.resume_id == Resume.id,
+                )
+                .where(
+                    Experience.id == request.target_id,
+                    Experience.resume_id == resume.id,
+                    Resume.user_id == current_user.id,
+                )
+            )
+
+            if experience is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Experience not found",
+                )
+
+            experience.description = request.content
+
+        elif section == "project":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for project",
+                )
+
+            project = db.scalar(
+                select(Project)
+                .join(
+                    Resume,
+                    Project.resume_id == Resume.id,
+                )
+                .where(
+                    Project.id == request.target_id,
+                    Project.resume_id == resume.id,
+                    Resume.user_id == current_user.id,
+                )
+            )
+
+            if project is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found",
+                )
+
+            project.description = request.content
+
+        elif section == "skill":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for skill",
+                )
+
+            skill = db.scalar(
+                select(Skill).where(
+                    Skill.id == request.target_id,
+                    Skill.resume_id == resume.id,
+                )
+            )
+
+            if skill is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Skill not found",
+                )
+
+            skill.name = request.content
+
+        elif section == "education":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for education",
+                )
+
+            education = db.scalar(
+                select(Education).where(
+                    Education.id == request.target_id,
+                    Education.resume_id == resume.id,
+                )
+            )
+
+            if education is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Education not found",
+                )
+
+            education.description = request.content
+
+        elif section == "certification":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for certification",
+                )
+
+            certification = db.scalar(
+                select(Certification).where(
+                    Certification.id == request.target_id,
+                    Certification.resume_id == resume.id,
+                )
+            )
+
+            if certification is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Certification not found",
+                )
+
+            certification.name = request.content
+
+        elif section == "language":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for language",
+                )
+
+            language = db.scalar(
+                select(Language).where(
+                    Language.id == request.target_id,
+                    Language.resume_id == resume.id,
+                )
+            )
+
+            if language is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Language not found",
+                )
+
+            language.name = request.content
+
+        elif section == "achievement":
+            if request.target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_id is required for achievement",
+                )
+
+            achievement = db.scalar(
+                select(Achievement).where(
+                    Achievement.id == request.target_id,
+                    Achievement.resume_id == resume.id,
+                )
+            )
+
+            if achievement is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Achievement not found",
+                )
+
+            achievement.description = request.content
+
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for experience",
+                detail=f"Unsupported section: {section}",
             )
 
-        experience = db.scalar(
-            select(Experience)
-            .join(
-                Resume,
-                Experience.resume_id == Resume.id,
-            )
-            .where(
-                Experience.id == request.target_id,
-                Experience.resume_id == resume.id,
-                Resume.user_id == current_user.id,
-            )
-        )
+        db.commit()
 
-        if experience is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Experience not found",
-            )
+        return {
+            "message": "AI change applied successfully",
+            "resume_id": resume.id,
+            "section": section,
+            "target_id": request.target_id,
+        }
 
-        experience.description = request.content
+    except HTTPException:
+        db.rollback()
+        raise
 
-
-    elif section == "project":
-        if request.target_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for project",
-            )
-
-        project = db.scalar(
-            select(Project)
-            .join(
-                Resume,
-                Project.resume_id == Resume.id,
-            )
-            .where(
-                Project.id == request.target_id,
-                Project.resume_id == resume.id,
-                Resume.user_id == current_user.id,
-            )
-        )
-
-        if project is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found",
-            )
-
-        project.description = request.content
-
-
-    elif section == "skill":
-        if request.target_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for skill",
-            )
-
-        skill = db.scalar(
-            select(Skill).where(
-                Skill.id == request.target_id,
-                Skill.resume_id == resume.id,
-            )
-        )
-
-        if skill is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Skill not found",
-            )
-
-        skill.name = request.content
-
-
-    elif section == "education":
-        if request.target_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for education",
-            )
-
-        education = db.scalar(
-            select(Education).where(
-                Education.id == request.target_id,
-                Education.resume_id == resume.id,
-            )
-        )
-
-        if education is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Education not found",
-            )
-
-        education.description = request.content
-
-
-    elif section == "certification":
-        if request.target_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for certification",
-            )
-
-        certification = db.scalar(
-            select(Certification).where(
-                Certification.id == request.target_id,
-                Certification.resume_id == resume.id,
-            )
-        )
-
-        if certification is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Certification not found",
-            )
-
-        certification.name = request.content
-
-
-    elif section == "language":
-        if request.target_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for language",
-            )
-
-        language = db.scalar(
-            select(Language).where(
-                Language.id == request.target_id,
-                Language.resume_id == resume.id,
-            )
-        )
-
-        if language is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Language not found",
-            )
-
-        language.name = request.content
-
-
-    elif section == "achievement":
-        if request.target_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_id is required for achievement",
-            )
-
-        achievement = db.scalar(
-            select(Achievement).where(
-                Achievement.id == request.target_id,
-                Achievement.resume_id == resume.id,
-            )
-        )
-
-        if achievement is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Achievement not found",
-            )
-
-        achievement.description = request.content
-
-
-    db.commit()
-
-    return {
-        "message": "AI change applied successfully",
-        "resume_id": resume.id,
-        "section": section,
-        "target_id": request.target_id,
-    }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to apply AI change",
+        ) from exc
 
 
 
@@ -744,56 +758,98 @@ def apply_tailored_resume(
             detail="Resume not found",
         )
 
-    if request.summary is not None:
-        profile = db.scalar(
-            select(CandidateProfile).where(
-                CandidateProfile.user_id == current_user.id
-            )
-        )
+    try:
+        # -----------------------------------------------------
+        # Summary
+        # -----------------------------------------------------
 
-        if profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Candidate profile not found",
-            )
-
-        profile.summary = request.summary
-
-    for project_id, description in request.project_updates.items():
-        project = db.scalar(
-            select(Project).where(
-                Project.id == int(project_id),
-                Project.resume_id == resume.id,
-            )
-        )
-
-        if project is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Project {project_id} not found",
+        if request.summary is not None:
+            profile = db.scalar(
+                select(CandidateProfile).where(
+                    CandidateProfile.user_id
+                    == current_user.id
+                )
             )
 
-        project.description = description
+            if profile is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Candidate profile not found",
+                )
 
-    for experience_id, description in request.experience_updates.items():
-        experience = db.scalar(
-            select(Experience).where(
-                Experience.id == int(experience_id),
-                Experience.resume_id == resume.id,
+            profile.summary = request.summary
+
+        # -----------------------------------------------------
+        # Projects
+        # -----------------------------------------------------
+
+        for project_id, description in (
+            request.project_updates.items()
+        ):
+            project = db.scalar(
+                select(Project).where(
+                    Project.id == int(project_id),
+                    Project.resume_id == resume.id,
+                )
             )
-        )
 
-        if experience is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Experience {experience_id} not found",
+            if project is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        f"Project {project_id} not found"
+                    ),
+                )
+
+            project.description = description
+
+        # -----------------------------------------------------
+        # Experience
+        # -----------------------------------------------------
+
+        for experience_id, description in (
+            request.experience_updates.items()
+        ):
+            experience = db.scalar(
+                select(Experience).where(
+                    Experience.id == int(experience_id),
+                    Experience.resume_id == resume.id,
+                )
             )
 
-        experience.description = description
+            if experience is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        f"Experience {experience_id} not found"
+                    ),
+                )
 
-    db.commit()
+            experience.description = description
 
-    return {
-        "message": "Tailored resume changes applied successfully",
-        "resume_id": resume.id,
-    }
+        # -----------------------------------------------------
+        # Skills
+        #
+        # Keep this empty for now unless the application
+        # explicitly supports changing skills through tailored
+        # resume application.
+        # -----------------------------------------------------
+
+        db.commit()
+
+        return {
+            "message": "Tailored resume changes applied successfully",
+            "resume_id": resume.id,
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to apply tailored resume changes",
+        ) from exc

@@ -36,6 +36,11 @@ class CandidateProfile(Base):
         nullable=True,
     )
 
+    email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     professional_title: Mapped[str | None] = mapped_column(
         String(150),
         nullable=True,

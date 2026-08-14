@@ -83,6 +83,25 @@ class GenerateResumeRequest(BaseModel):
     )
 
 
+class GeneratedExperienceUpdate(BaseModel):
+    id: int
+    description: str
+
+
+class GeneratedProjectUpdate(BaseModel):
+    id: int
+    description: str
+
+
+class GeneratedResumeContent(BaseModel):
+    summary: str = ""
+    experience: list[GeneratedExperienceUpdate] = Field(
+        default_factory=list
+    )
+    projects: list[GeneratedProjectUpdate] = Field(
+        default_factory=list
+    )
+
 class GeneratedResumeResponse(BaseModel):
     resume_id: int
     content: str       
@@ -135,3 +154,22 @@ class ApplyTailoredResumeRequest(BaseModel):
     skill_ids: list[int] = Field(default_factory=list)
     experience_updates: dict[int, str] = Field(default_factory=dict)
     project_updates: dict[int, str] = Field(default_factory=dict)
+
+class GeneratedTailoredExperience(BaseModel):
+    id: int
+    description: str
+
+
+class GeneratedTailoredProject(BaseModel):
+    id: int
+    description: str
+
+
+class GeneratedTailoredContent(BaseModel):
+    summary: str = ""
+    experience: list[GeneratedTailoredExperience] = Field(
+        default_factory=list
+    )
+    projects: list[GeneratedTailoredProject] = Field(
+        default_factory=list
+    )

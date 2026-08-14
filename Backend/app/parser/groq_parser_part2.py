@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 
 import json
 from typing import Any
@@ -195,6 +196,244 @@ OUTPUT
 - Return only JSON.
 """
 
+
+def _normalize_part2_data(
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Normalize flexible Groq JSON into the application's
+    canonical ParsedResume field names and types.
+    """
+
+    # ---------------------------------------------------------
+    # Experience
+    # ---------------------------------------------------------
+
+    normalized_experience = []
+
+    for item in data.get("experience", []) or []:
+        if not isinstance(item, dict):
+            continue
+
+        job_title = (
+            item.get("job_title")
+            or item.get("role")
+            or ""
+        )
+
+        start_date = (
+            item.get("start_date")
+            or ""
+        )
+
+        end_date = (
+            item.get("end_date")
+            or ""
+        )
+
+        # Groq may return:
+        # "01/2024 – 02/2024"
+        dates = str(
+            item.get("dates") or ""
+        ).strip()
+
+        if dates and not start_date and not end_date:
+            parts = re.split(
+                r"\s*(?:-|–|—|to)\s*",
+                dates,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )
+
+            if len(parts) == 2:
+                start_date = parts[0].strip()
+                end_date = parts[1].strip()
+
+        normalized_experience.append(
+            {
+                "company": str(
+                    item.get("company") or ""
+                ).strip(),
+                "job_title": str(
+                    job_title
+                ).strip(),
+                "location": str(
+                    item.get("location") or ""
+                ).strip(),
+                "employment_type": str(
+                    item.get("employment_type") or ""
+                ).strip(),
+                "start_date": str(
+                    start_date
+                ).strip(),
+                "end_date": str(
+                    end_date
+                ).strip(),
+                "is_current": bool(
+                    item.get("is_current", False)
+                ),
+                "description": str(
+                    item.get("description") or ""
+                ).strip(),
+            }
+        )
+
+    # ---------------------------------------------------------
+    # Projects
+    # ---------------------------------------------------------
+
+    normalized_projects = []
+
+    for item in data.get("projects", []) or []:
+        if not isinstance(item, dict):
+            continue
+
+        technologies = item.get(
+            "technologies"
+        ) or []
+
+        if isinstance(technologies, str):
+            technologies = [
+                value.strip()
+                for value in technologies.split(",")
+                if value.strip()
+            ]
+
+        normalized_projects.append(
+            {
+                "title": str(
+                    item.get("title") or ""
+                ).strip(),
+                "role": str(
+                    item.get("role") or ""
+                ).strip(),
+                "description": str(
+                    item.get("description") or ""
+                ).strip(),
+                "technologies": technologies,
+                "project_url": str(
+                    item.get("project_url") or ""
+                ).strip(),
+                "start_date": str(
+                    item.get("start_date") or ""
+                ).strip(),
+                "end_date": str(
+                    item.get("end_date") or ""
+                ).strip(),
+            }
+        )
+
+    # ---------------------------------------------------------
+    # Certifications
+    # ---------------------------------------------------------
+
+    normalized_certifications = []
+
+    for item in data.get(
+        "certifications",
+        [],
+    ) or []:
+        if not isinstance(item, dict):
+            continue
+
+        normalized_certifications.append(
+            {
+                "name": str(
+                    item.get("name") or ""
+                ).strip(),
+                "issuing_organization": str(
+                    item.get("issuing_organization")
+                    or item.get("issuer")
+                    or ""
+                ).strip(),
+                "issue_date": str(
+                    item.get("issue_date")
+                    or item.get("date")
+                    or ""
+                ).strip(),
+                "expiration_date": str(
+                    item.get("expiration_date")
+                    or ""
+                ).strip(),
+                "credential_id": str(
+                    item.get("credential_id")
+                    or ""
+                ).strip(),
+                "credential_url": str(
+                    item.get("credential_url")
+                    or ""
+                ).strip(),
+            }
+        )
+
+    # ---------------------------------------------------------
+    # Languages
+    # ---------------------------------------------------------
+
+    normalized_languages = []
+
+    for item in data.get(
+        "languages",
+        [],
+    ) or []:
+        if not isinstance(item, dict):
+            continue
+
+        normalized_languages.append(
+            {
+                "name": str(
+                    item.get("name") or ""
+                ).strip(),
+                "proficiency": str(
+                    item.get("proficiency") or ""
+                ).strip(),
+            }
+        )
+
+    # ---------------------------------------------------------
+    # Achievements
+    # ---------------------------------------------------------
+
+    normalized_achievements = []
+
+    for item in data.get(
+        "achievements",
+        [],
+    ) or []:
+        if not isinstance(item, dict):
+            continue
+
+        year = item.get("year", 0)
+
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            year = 0
+
+        normalized_achievements.append(
+            {
+                "title": str(
+                    item.get("title") or ""
+                ).strip(),
+                "description": str(
+                    item.get("description") or ""
+                ).strip(),
+                "organization": str(
+                    item.get("organization") or ""
+                ).strip(),
+                "year": year,
+            }
+        )
+
+    return {
+        "experience": normalized_experience,
+        "projects": normalized_projects,
+        "certifications": normalized_certifications,
+        "languages": normalized_languages,
+        "achievements": normalized_achievements,
+    }
+
+
 def parse_part2(text: str) -> dict[str, Any]:
     if not text or not text.strip():
         raise ValueError("Resume text is empty.")
@@ -223,14 +462,9 @@ def parse_part2(text: str) -> dict[str, Any]:
             },
         ],
         response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "resume_part2",
-                "strict": True,
-                "schema": PART2_SCHEMA,
-            },
+            "type": "json_object",
         },
-    )
+            )
 
     content = response.choices[0].message.content
 
@@ -239,4 +473,11 @@ def parse_part2(text: str) -> dict[str, Any]:
             "Groq part 2 returned empty output."
         )
 
-    return json.loads(content)
+    data = json.loads(content)
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            "Groq part 2 returned invalid JSON structure."
+        )
+
+    return _normalize_part2_data(data)

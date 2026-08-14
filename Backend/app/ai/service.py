@@ -6,6 +6,12 @@ from app.ai.prompts import (
 import json
 from app.quality.schemas import AIResumeQualityResponse
 
+
+from app.ai.resume_formatter import format_resume_text
+from app.ai.prompts import (
+    STRUCTURED_RESUME_GENERATION_PROMPT,
+)
+
 from app.ai.prompts import AI_RESUME_QUALITY_PROMPT
 from app.ai.jd_schemas import JobDescriptionAnalysis
 from app.ai.prompts import JOB_DESCRIPTION_ANALYSIS_PROMPT
@@ -23,8 +29,9 @@ from app.ai.schemas import (
     ImproveExperienceResponse,
     ImproveSummaryResponse,
     GeneratedResumeResponse,
+    GeneratedResumeContent,
+    GeneratedTailoredContent,
     TailoredResumeResponse,
-   
 )
 
 from app.ai.prompts import (
@@ -34,11 +41,28 @@ from app.ai.prompts import (
     SUMMARY_IMPROVEMENT_PROMPT,
     FULL_RESUME_PROMPT,
     TAILORED_RESUME_PROMPT,
+    STRUCTURED_TAILORED_RESUME_PROMPT,
+    STRUCTURED_RESUME_GENERATION_PROMPT,
 
 )
 
 import json
 import re
+
+FORBIDDEN_RESUME_PLACEHOLDERS = (
+    "https://example.com/",
+    "https://example.com",
+    "example.com",
+    "example@example.com",
+    "[location]",
+    "[company]",
+    "[job title]",
+    "[phone]",
+    "[email]",
+    "[linkedin]",
+    "[github]",
+    "[portfolio]",
+)
 
 
 def parse_json_response(raw_response: str) -> dict:
@@ -68,6 +92,44 @@ def parse_json_response(raw_response: str) -> dict:
         raise RuntimeError(
             "AI returned invalid JSON"
         ) from exc
+
+
+
+def validate_generated_resume(
+    content: str,
+) -> str:
+    """
+    Reject generated resumes containing obvious placeholder
+    or example values.
+    """
+
+    if not content or not content.strip():
+        raise RuntimeError(
+            "AI returned an empty resume."
+        )
+
+    lowered = content.lower()
+
+    for forbidden in FORBIDDEN_RESUME_PLACEHOLDERS:
+        if forbidden in lowered:
+            raise RuntimeError(
+                f"AI generated forbidden placeholder: {forbidden}"
+            )
+
+    # Catch obvious generic placeholder values such as:
+    # Name: string
+    # Phone: string
+    # Location: string
+    if re.search(
+        r"(?im)^\s*(name|phone|location|email|professional title)"
+        r"\s*:\s*string\b",
+        content,
+    ):
+        raise RuntimeError(
+            "AI generated placeholder field values."
+        )
+
+    return content.strip()
 
 
 class AIService:
@@ -164,33 +226,164 @@ class AIService:
     def generate_resume(
         self,
         resume_id: int,
-        profile: str,
-        education: str,
-        experience: str,
-        skills: str,
-        projects: str,
-        certifications: str,
-        languages: str,
-        achievements: str,
+        generation_context: dict,
         instruction: str | None,
     ) -> GeneratedResumeResponse:
-        prompt = FULL_RESUME_PROMPT.format(
-            profile=profile,
-            education=education,
-            experience=experience,
-            skills=skills,
-            projects=projects,
-            certifications=certifications,
-            languages=languages,
-            achievements=achievements,
+
+        import json
+
+        prompt = STRUCTURED_RESUME_GENERATION_PROMPT.format(
+            profile=json.dumps(
+                generation_context["profile"],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            experience=json.dumps(
+                generation_context["experience"],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            projects=json.dumps(
+                generation_context["projects"],
+                ensure_ascii=False,
+                indent=2,
+            ),
             instruction=instruction or "",
         )
 
-        generated_content = self.provider.generate(prompt)
+        raw_response = self.provider.generate(
+            prompt
+        )
+
+        try:
+            data = parse_json_response(
+                raw_response
+            )
+
+            generated = (
+                GeneratedResumeContent.model_validate(
+                    data
+                )
+            )
+
+        except ValueError as exc:
+            raise RuntimeError(
+                "AI returned invalid structured resume content"
+            ) from exc
+
+        # ---------------------------------------------------------
+        # Only accept IDs that actually belong to this resume.
+        # ---------------------------------------------------------
+
+        experience_map = {
+            item["id"]: item
+            for item in generation_context["experience"]
+        }
+
+        project_map = {
+            item["id"]: item
+            for item in generation_context["projects"]
+        }
+
+        generated_experience = {
+            item.id: item.description.strip()
+            for item in generated.experience
+            if item.id in experience_map
+            and item.description.strip()
+        }
+
+        generated_projects = {
+            item.id: item.description.strip()
+            for item in generated.projects
+            if item.id in project_map
+            and item.description.strip()
+        }
+
+        # ---------------------------------------------------------
+        # Preserve original factual data.
+        # AI can improve prose only.
+        # ---------------------------------------------------------
+
+        experience_records = []
+
+        for item in generation_context["experience"]:
+            experience_records.append(
+                {
+                    **item,
+                    "description": (
+                        generated_experience.get(
+                            item["id"],
+                            item["description"],
+                        )
+                    ),
+                }
+            )
+
+        project_records = []
+
+        for item in generation_context["projects"]:
+            project_records.append(
+                {
+                    **item,
+                    "description": (
+                        generated_projects.get(
+                            item["id"],
+                            item["description"],
+                        )
+                    ),
+                }
+            )
+
+        summary = (
+            generated.summary.strip()
+            if generated.summary.strip()
+            else generation_context[
+                "profile"
+            ].get("summary", "")
+        )
+
+        content = format_resume_text(
+            profile=generation_context["profile"],
+            summary=summary,
+            education=generation_context[
+                "education"
+            ],
+            experience=experience_records,
+            skills=generation_context[
+                "skills"
+            ],
+            projects=project_records,
+            certifications=generation_context[
+                "certifications"
+            ],
+            languages=[
+                (
+                    f"{item['name']} "
+                    f"({item['proficiency']})"
+                    if item["proficiency"]
+                    else item["name"]
+                )
+                for item in generation_context[
+                    "languages"
+                ]
+            ],
+            achievements=[
+                item["description"]
+                for item in generation_context[
+                    "achievements"
+                ]
+                if item["description"]
+            ],
+        )
+
+        if not content.strip():
+            raise RuntimeError(
+                "Generated resume content is empty"
+            )
 
         return GeneratedResumeResponse(
             resume_id=resume_id,
-            content=generated_content,
+            content=content,
         )
 
     def analyze_job_description(
@@ -309,37 +502,142 @@ class AIService:
         self,
         resume_id: int,
         job_description_id: int,
-        profile: str,
-        education: str,
-        experience: str,
-        skills: str,
-        projects: str,
-        certifications: str,
-        languages: str,
-        achievements: str,
+        generation_context: dict,
         job_description: str,
         instruction: str | None,
     ) -> TailoredResumeResponse:
 
-        prompt = TAILORED_RESUME_PROMPT.format(
-            profile=profile,
-            education=education,
-            experience=experience,
-            skills=skills,
-            projects=projects,
-            certifications=certifications,
-            languages=languages,
-            achievements=achievements,
+        import json
+
+        prompt = STRUCTURED_TAILORED_RESUME_PROMPT.format(
+            profile=json.dumps(
+                generation_context["profile"],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            experience=json.dumps(
+                generation_context["experience"],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            projects=json.dumps(
+                generation_context["projects"],
+                ensure_ascii=False,
+                indent=2,
+            ),
             job_description=job_description,
             instruction=instruction or "",
         )
 
-        content = self.provider.generate(prompt)
+        raw_response = self.provider.generate(
+            prompt
+        )
+
+        try:
+            data = parse_json_response(
+                raw_response
+            )
+
+            tailored = (
+                GeneratedTailoredContent.model_validate(
+                    data
+                )
+            )
+
+        except ValueError as exc:
+            raise RuntimeError(
+                "AI returned invalid structured tailored resume content"
+            ) from exc
+
+        experience_map = {
+            item["id"]: item
+            for item in generation_context["experience"]
+        }
+
+        project_map = {
+            item["id"]: item
+            for item in generation_context["projects"]
+        }
+
+        updated_experience = {
+            item.id: item.description.strip()
+            for item in tailored.experience
+            if item.id in experience_map
+            and item.description.strip()
+        }
+
+        updated_projects = {
+            item.id: item.description.strip()
+            for item in tailored.projects
+            if item.id in project_map
+            and item.description.strip()
+        }
+
+        experience_records = []
+
+        for item in generation_context["experience"]:
+            experience_records.append(
+                {
+                    **item,
+                    "description": updated_experience.get(
+                        item["id"],
+                        item["description"],
+                    ),
+                }
+            )
+
+        project_records = []
+
+        for item in generation_context["projects"]:
+            project_records.append(
+                {
+                    **item,
+                    "description": updated_projects.get(
+                        item["id"],
+                        item["description"],
+                    ),
+                }
+            )
+
+        summary = (
+            tailored.summary.strip()
+            if tailored.summary.strip()
+            else generation_context["profile"].get(
+                "summary",
+                "",
+            )
+        )
+
+        content = format_resume_text(
+            profile=generation_context["profile"],
+            summary=summary,
+            education=generation_context["education"],
+            experience=experience_records,
+            skills=generation_context["skills"],
+            projects=project_records,
+            certifications=generation_context[
+                "certifications"
+            ],
+            languages=[
+                (
+                    f"{item['name']} ({item['proficiency']})"
+                    if item["proficiency"]
+                    else item["name"]
+                )
+                for item in generation_context["languages"]
+            ],
+            achievements=[
+                item["description"]
+                for item in generation_context["achievements"]
+                if item["description"]
+            ],
+        )
 
         return TailoredResumeResponse(
             resume_id=resume_id,
             job_description_id=job_description_id,
             content=content,
+            structured=None,
         )
 
 

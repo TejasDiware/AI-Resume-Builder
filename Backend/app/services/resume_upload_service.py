@@ -471,30 +471,9 @@ def _update_candidate_profile(
         parsed.contact.name
     )
 
-    if profile is None:
-        if not first_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Unable to determine candidate name "
-                    "from the uploaded resume."
-                ),
-            )
-
-        profile = CandidateProfile(
-            user_id=current_user_id,
-            first_name=first_name,
-            last_name=last_name,
-        )
-
-        db.add(profile)
-
-    else:
-        if first_name:
-            profile.first_name = first_name
-
-        if last_name:
-            profile.last_name = last_name
+    email = _safe_text(
+        parsed.contact.email
+    )
 
     phone = _safe_text(
         parsed.contact.phone
@@ -516,20 +495,52 @@ def _update_candidate_profile(
         parsed.contact.portfolio
     )
 
-    if phone:
-        profile.phone = phone
+    if profile is None:
+        if not first_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Unable to determine candidate name "
+                    "from the uploaded resume."
+                ),
+            )
 
-    if location:
-        profile.location = location
+        profile = CandidateProfile(
+            user_id=current_user_id,
+            first_name=first_name,
+            last_name=last_name,
+            email=email or None,
+            phone=phone or None,
+            location=location or None,
+            linkedin_url=linkedin or None,
+            github_url=github or None,
+            portfolio_url=portfolio or None,
+        )
 
-    if linkedin:
-        profile.linkedin_url = linkedin
+        db.add(profile)
 
-    if github:
-        profile.github_url = github
+    else:
+        if first_name:
+            profile.first_name = first_name
 
-    if portfolio:
-        profile.portfolio_url = portfolio
+        if last_name:
+            profile.last_name = last_name
+
+        if email:
+            profile.email = email
+
+        if phone:
+            profile.phone = phone
+
+        if location:
+            profile.location = location
+
+        # The uploaded resume is the source of truth
+        # for these optional contact URLs.
+        profile.linkedin_url = linkedin or None
+        profile.github_url = github or None
+        profile.portfolio_url = portfolio or None
+
 
 def replace_resume_from_upload(
     *,

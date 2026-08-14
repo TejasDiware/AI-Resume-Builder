@@ -84,13 +84,18 @@ You are a professional resume writer.
 
 Improve the candidate's professional summary for a modern resume.
 
-Rules:
-- Preserve all facts from the provided information.
-- Do not invent experience, technologies, achievements, metrics,
-  certifications, or responsibilities.
+STRICT RULES:
+- Use ONLY facts explicitly provided below.
+- Never invent experience, technologies, achievements, metrics,
+  certifications, responsibilities, employers, or years.
+- Never use placeholders.
+- Never output [Location], [Company], [Title], [Years of Experience],
+  or similar template text.
+- Never use example.com or fabricated URLs.
+- If location is unavailable, omit location entirely.
+- If professional title is unavailable, do not invent one.
 - Keep the summary concise and professional.
-- Use strong but natural language.
-- Tailor the wording to the candidate's professional title.
+- Use strong but truthful language.
 - Return only the improved summary.
 
 Professional title:
@@ -113,22 +118,53 @@ You are an expert professional resume writer.
 Create a polished, ATS-friendly resume using ONLY the candidate information
 provided below.
 
-STRICT FACTUALITY RULES:
-- Do not invent or infer facts.
-- Do not add metrics unless explicitly provided.
-- Do not claim performance improvements unless explicitly provided.
-- Do not claim responsibilities that are not explicitly provided.
-- Do not add technologies that are not explicitly provided.
-- Do not add company names, job titles, dates, certifications, achievements,
-  users, team sizes, or outcomes that are not provided.
-- Do not convert vague statements into specific achievements.
-- You may improve grammar, wording, structure, and clarity.
-- You may use stronger action verbs only when the original fact remains true.
-- If a section has no data, omit that section.
-- Never fabricate missing information.
-- Return only the resume.
+The candidate information is the ONLY source of truth.
 
-Use the following information exactly as the source of truth.
+STRICT FACTUALITY RULES:
+- Never invent or infer facts.
+- Never create placeholder values.
+- Never use template/example values.
+- Never output the word "string" as a value.
+- Never output values such as:
+  [Location]
+  [Company]
+  [Job Title]
+  [Phone]
+  [Email]
+  [LinkedIn]
+  [GitHub]
+  [Portfolio]
+  https://example.com/
+  example@example.com
+  or any similar placeholder/example value.
+- Never invent URLs.
+- If LinkedIn, GitHub, Portfolio, phone, location, or another field
+  is unavailable, OMIT that field completely.
+- Never invent a professional title.
+- Never invent metrics, percentages, achievements, users, team sizes,
+  responsibilities, technologies, certifications, dates, companies,
+  or outcomes.
+- Never infer a role that is not explicitly provided.
+- Never convert a skill into an achievement.
+- Never convert a project into work experience.
+- Never convert an internship into a permanent job.
+- Never add a technology merely because it is commonly associated with
+  the candidate's role.
+- Preserve all explicitly provided skills.
+- Do not remove factual resume information merely to shorten the resume.
+- Preserve education, experience, projects, certifications,
+  languages, and achievements when they contain data.
+- If a section has no data, omit that section.
+- You may improve grammar, wording, formatting, ordering, and clarity.
+- You may use stronger action verbs only when the resulting statement
+  remains factually equivalent to the source.
+- Do not add information from your general knowledge.
+- Return ONLY the final resume content.
+- Do not include explanations, comments, notes, placeholders,
+  or generation instructions.
+
+SOURCE INFORMATION
+------------------
 
 Candidate Profile:
 {profile}
@@ -156,6 +192,20 @@ Achievements:
 
 Additional instruction:
 {instruction}
+
+FINAL OUTPUT RULES
+------------------
+
+Before producing the final answer, verify:
+
+1. Every factual statement is supported by the source information.
+2. No placeholder text exists.
+3. No example URL exists.
+4. No fabricated contact information exists.
+5. No skill from the supplied skills is silently removed.
+6. No unsupported job title or professional title is added.
+7. Missing information is omitted instead of invented.
+8. The result contains only the final resume.
 """
 
 
@@ -396,4 +446,176 @@ Issues:
 
 Candidate resume:
 {resume_context}
+"""
+
+
+
+STRUCTURED_RESUME_GENERATION_PROMPT = """
+You are a professional resume editor.
+
+You are NOT creating facts for a resume.
+
+You are ONLY improving the wording of the supplied summary,
+experience descriptions, and project descriptions.
+
+STRICT RULES:
+
+- Use ONLY the information supplied below.
+- Never invent facts.
+- Never invent technologies.
+- Never invent metrics.
+- Never invent responsibilities.
+- Never invent achievements.
+- Never invent companies.
+- Never invent dates.
+- Never invent education.
+- Never invent certifications.
+- Never invent URLs.
+- Never invent contact information.
+- Never change company names.
+- Never change job titles.
+- Never change project titles.
+- Never change education institutions.
+- Never change skill names.
+- Never create a project role that is not provided.
+- Never add information from general knowledge.
+- Preserve the original meaning.
+- Use professional resume wording.
+- Use strong action verbs only when the original fact remains true.
+
+The application will assemble the final resume itself.
+
+Return ONLY valid JSON with this structure:
+
+{{
+  "summary": "",
+  "experience": [
+    {{
+      "id": 0,
+      "description": ""
+    }}
+  ],
+  "projects": [
+    {{
+      "id": 0,
+      "description": ""
+    }}
+  ]
+}}
+
+Rules for IDs:
+
+- Use exactly the IDs supplied in the input.
+- Never create new IDs.
+- Do not omit an existing experience or project unless its
+  original description is empty.
+- Do not change any factual field other than description/summary.
+
+Candidate Profile:
+{profile}
+
+Experience:
+{experience}
+
+Projects:
+{projects}
+
+Additional instruction:
+{instruction}
+"""
+
+
+
+STRUCTURED_TAILORED_RESUME_PROMPT = """
+You are a professional resume editor and ATS optimization assistant.
+
+You are NOT creating a new resume from scratch.
+
+You are ONLY improving and prioritizing the wording of the candidate's
+existing summary, experience descriptions, and project descriptions for
+the target job description.
+
+STRICT FACTUALITY RULES:
+
+- Use ONLY facts supplied in the candidate resume.
+- Never invent facts.
+- Never invent technologies.
+- Never invent metrics.
+- Never invent responsibilities.
+- Never invent achievements.
+- Never invent companies.
+- Never invent dates.
+- Never invent education.
+- Never invent certifications.
+- Never invent URLs.
+- Never invent contact information.
+- Never change company names.
+- Never change job titles.
+- Never change project titles.
+- Never change education institutions.
+- Never change skill names.
+- Never create a project role that is not supplied.
+- Never claim that the candidate performed a responsibility
+  merely because it is mentioned in the job description.
+- Never add a job-description skill as if the candidate already had it.
+- Never transform a job requirement into candidate experience.
+- Never add a technology because it is common for the target role.
+- Only emphasize terminology from the job description when it accurately
+  matches facts already present in the candidate resume.
+- Preserve the original meaning of every description.
+- Use stronger action verbs only when the resulting statement remains
+  factually equivalent.
+- The application will assemble the final tailored resume itself.
+
+Return ONLY valid JSON with this structure:
+
+{{
+  "summary": "",
+  "experience": [
+    {{
+      "id": 0,
+      "description": ""
+    }}
+  ],
+  "projects": [
+    {{
+      "id": 0,
+      "description": ""
+    }}
+  ]
+}}
+
+ID RULES:
+
+- Use exactly the IDs supplied in the candidate context.
+- Never create a new ID.
+- Never change an ID.
+- Preserve every existing experience and project.
+- Only modify description text.
+- Do not modify names, dates, job titles, technologies, or other
+  factual fields.
+
+TARGETING RULES:
+
+- Prefer content relevant to the target job.
+- Do not remove true facts simply because they are less relevant.
+- Do not add claims merely to improve ATS score.
+- If a job requirement is missing from the candidate resume,
+  leave it missing.
+- Do not tell the candidate they performed something they did not perform.
+
+Candidate Profile:
+{profile}
+
+Experience:
+{experience}
+
+Projects:
+{projects}
+
+Target Job Description:
+{job_description}
+
+Additional instruction:
+{instruction}
 """

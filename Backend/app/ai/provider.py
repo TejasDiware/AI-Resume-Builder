@@ -40,7 +40,8 @@ class GroqProvider(LLMProvider):
                     }
                 ],
                 temperature=0.3,
-                timeout=30.0,
+                max_completion_tokens=4000,
+                timeout=60.0,
             )
 
             content = response.choices[0].message.content
@@ -51,4 +52,6 @@ class GroqProvider(LLMProvider):
             return content.strip()
 
         except Exception as exc:
-            raise RuntimeError("AI provider request failed") from exc
+            raise RuntimeError(
+                f"AI provider request failed: {exc}"
+            ) from exc
