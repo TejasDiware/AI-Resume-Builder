@@ -39,3 +39,9 @@ typing-inspection==0.4.3
 typing_extensions==4.16.0
 tzdata==2026.3
 uvicorn==0.52.1
+pdfplumber==0.11.10
+PyMuPDF==1.28.2
+spacy==3.8.15
+docx2python==3.7.1
+reportlab==5.0.0
+groq==1.6.0

@@ -4,12 +4,13 @@ import os
 import shutil
 import uuid
 from pathlib import Path
+from datetime import date
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.extractor.info_extractor import extract_basic_info
+
 from app.models.achievement import Achievement
 from app.models.candidate_profile import CandidateProfile
 from app.models.certification import Certification
@@ -20,9 +21,9 @@ from app.models.project import Project
 from app.models.resume import Resume, ResumeStatus
 from app.models.skill import Skill
 from app.parser.document_parser import extract_text
-from app.services.resume_normalizer import (
-    normalize_resume_info,
-)
+from app.parser.groq_resume_parser import parse_resume_with_groq
+from app.parser.schemas import ParsedResume
+
 
 
 UPLOAD_DIR = Path("uploads") / "resumes"
@@ -82,6 +83,53 @@ def _parse_year(value: Any) -> int | None:
 
     return None
 
+def _parse_date(value: Any) -> date | None:
+    """
+    Convert common resume date formats into a Python date.
+
+    Examples:
+        01/2024 -> 2024-01-01
+        02/2024 -> 2024-02-01
+        2024-01-01 -> 2024-01-01
+        2024 -> 2024-01-01
+    """
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if not text:
+        return None
+
+    # MM/YYYY
+    try:
+        if "/" in text:
+            month_text, year_text = text.split("/", 1)
+
+            month = int(month_text)
+            year = int(year_text)
+
+            if 1 <= month <= 12 and 1900 <= year <= 2100:
+                return date(year, month, 1)
+    except (TypeError, ValueError):
+        pass
+
+    # YYYY-MM-DD
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+
+    # YYYY
+    try:
+        year = int(text)
+
+        if 1900 <= year <= 2100:
+            return date(year, 1, 1)
+    except (TypeError, ValueError):
+        pass
+
+    return None
 
 def _ensure_upload_directory() -> None:
     UPLOAD_DIR.mkdir(
@@ -136,12 +184,13 @@ def _save_uploaded_file(
 
 def _replace_resume_sections(
     resume: Resume,
-    info: dict[str, Any],
+    parsed: ParsedResume,
 ) -> None:
     """
     Replace all current structured resume sections.
 
     No version/history rows are created.
+    The current resume is fully replaced.
     """
 
     resume.education.clear()
@@ -158,7 +207,7 @@ def _replace_resume_sections(
 
     seen_skills: set[str] = set()
 
-    for raw_skill in info.get("skills") or []:
+    for raw_skill in parsed.skills:
         skill_name = _normalize_skill(raw_skill)
 
         if not skill_name:
@@ -173,7 +222,7 @@ def _replace_resume_sections(
 
         resume.skills.append(
             Skill(
-                name=skill_name,
+                name=skill_name[:100],
             )
         )
 
@@ -181,48 +230,63 @@ def _replace_resume_sections(
     # Education
     # ---------------------------------------------------------
 
-    education_data = info.get("education") or {}
+    for item in parsed.education:
+        institution = _safe_text(item.institution)
 
-    college = (
-        _safe_text(
-            education_data.get("college")
-        )
-        or "Not specified"
-    )
-
-    graduation_year = _parse_year(
-        education_data.get("graduation_year")
-    )
-
-    end_date = None
-
-    if graduation_year:
-        from datetime import date
-
-        end_date = date(
-            graduation_year,
-            1,
-            1,
-        )
-
-    for degree in education_data.get("degrees") or []:
-        degree_name = _safe_text(degree)
-
-        if not degree_name:
+        if not institution:
             continue
+
+        degree = _safe_text(item.degree)
+
+        start_date = None
+        end_date = None
+
+        if item.start_year and 1900 <= item.start_year <= 2100:
+            from datetime import date
+
+            start_date = date(
+                item.start_year,
+                1,
+                1,
+            )
+
+        if item.end_year and 1900 <= item.end_year <= 2100:
+            from datetime import date
+
+            end_date = date(
+                item.end_year,
+                1,
+                1,
+            )
+
+        description_parts: list[str] = []
+
+        if item.cgpa:
+            description_parts.append(
+                f"CGPA: {item.cgpa}"
+            )
+
+        if item.percentage:
+            description_parts.append(
+                f"Percentage: {item.percentage}"
+            )
+
+        description = (
+            " | ".join(description_parts)
+            if description_parts
+            else None
+        )
 
         resume.education.append(
             Education(
-                institution=college,
-                degree=degree_name,
-                field_of_study=None,
-                start_date=None,
-                end_date=end_date,
-                description=_safe_text(
-                    f"CGPA: {education_data.get('cgpa')}"
-                    if education_data.get("cgpa")
-                    else None
+                institution=institution,
+                degree=degree or "Not specified",
+                field_of_study=(
+                    _safe_text(item.field_of_study)
                 ),
+                start_date=start_date,
+                end_date=end_date,
+                description=description,
             )
         )
 
@@ -230,21 +294,8 @@ def _replace_resume_sections(
     # Experience
     # ---------------------------------------------------------
 
-    for item in info.get("experience") or []:
-        if not isinstance(item, dict):
-            continue
-
-        company = _safe_text(
-            item.get("company")
-        )
-
-        role = _safe_text(
-            item.get("role")
-        )
-
-        description = _safe_text(
-            item.get("description")
-        )
+    for item in parsed.experience:
+        company = _safe_text(item.company)
 
         if not company:
             continue
@@ -252,20 +303,24 @@ def _replace_resume_sections(
         resume.experience.append(
             Experience(
                 company=company,
-                job_title=role or "Professional Experience",
-                location=None,
-                employment_type=None,
-                start_date=None,
-                end_date=None,
-                is_current=(
-                    "present" in (
-                        item.get("duration") or ""
-                    ).lower()
-                    or "current" in (
-                        item.get("duration") or ""
-                    ).lower()
+                job_title=(
+                    _safe_text(item.job_title)
+                    or "Professional Experience"
                 ),
-                description=description,
+                location=_safe_text(item.location),
+                employment_type=_safe_text(
+                    item.employment_type
+                ),
+                start_date=_parse_date(
+                    item.start_date
+                ),
+                end_date=_parse_date(
+                    item.end_date
+                ),
+                is_current=item.is_current,
+                description=_safe_text(
+                    item.description
+                ),
             )
         )
 
@@ -273,41 +328,41 @@ def _replace_resume_sections(
     # Projects
     # ---------------------------------------------------------
 
-    for item in info.get("projects") or []:
-        if not isinstance(item, dict):
-            continue
-
-        title = _safe_text(
-            item.get("name")
-        )
+    for item in parsed.projects:
+        title = _safe_text(item.title)
 
         if not title:
             continue
 
-        technologies = item.get(
-            "technologies"
-        ) or []
+        technologies = [
+            str(value).strip()
+            for value in item.technologies
+            if str(value).strip()
+        ]
 
         technologies_text = ", ".join(
-            str(value).strip()
-            for value in technologies
-            if str(value).strip()
+            technologies
         )
 
         resume.projects.append(
             Project(
                 title=title,
                 description=_safe_text(
-                    item.get("description")
+                    item.description
                 ),
-                role=None,
+                role=_safe_text(item.role),
                 technologies=(
-                    technologies_text
-                    or None
+                    technologies_text or None
                 ),
-                project_url=None,
-                start_date=None,
-                end_date=None,
+                project_url=_safe_text(
+                    item.project_url
+                ),
+                start_date=_parse_date(
+                    item.start_date
+                ),
+                end_date=_parse_date(
+                    item.end_date
+                ),
             )
         )
 
@@ -315,8 +370,8 @@ def _replace_resume_sections(
     # Certifications
     # ---------------------------------------------------------
 
-    for item in info.get("certifications") or []:
-        certificate_name = _safe_text(item)
+    for item in parsed.certifications:
+        certificate_name = _safe_text(item.name)
 
         if not certificate_name:
             continue
@@ -324,38 +379,96 @@ def _replace_resume_sections(
         resume.certifications.append(
             Certification(
                 name=certificate_name,
-                issuing_organization="Not specified",
-                issue_date=None,
-                expiration_date=None,
-                credential_id=None,
-                credential_url=None,
+                issuing_organization=(
+                    _safe_text(
+                        item.issuing_organization
+                    )
+                    or "Not specified"
+                ),
+                issue_date=_parse_date(
+                    item.issue_date
+                ),
+                expiration_date=_parse_date(
+                    item.expiration_date
+                ),
+                credential_id=(
+                    _safe_text(item.credential_id)
+                ),
+                credential_url=(
+                    _safe_text(item.credential_url)
+                ),
             )
         )
 
-    # The current parser does not return
-    # languages or achievements, so those
-    # collections intentionally remain empty.
+    # ---------------------------------------------------------
+    # Languages
+    # ---------------------------------------------------------
+
+    for item in parsed.languages:
+        language_name = _safe_text(item.name)
+
+        if not language_name:
+            continue
+
+        resume.languages.append(
+            Language(
+                name=language_name,
+                proficiency=(
+                    _safe_text(item.proficiency)
+                ),
+            )
+        )
+
+    # ---------------------------------------------------------
+    # Achievements
+    # ---------------------------------------------------------
+
+    for item in parsed.achievements:
+        title = _safe_text(item.title)
+
+        if not title:
+            continue
+
+        resume.achievements.append(
+            Achievement(
+                title=title,
+                description=(
+                    _safe_text(item.description)
+                ),
+                organization=(
+                    _safe_text(item.organization)
+                ),
+                year=(
+                    item.year
+                    if item.year
+                    and 1900 <= item.year <= 2100
+                    else None
+                ),
+            )
+        )
 
 
 def _update_candidate_profile(
     db: Session,
     current_user_id: int,
-    info: dict[str, Any],
+    parsed: ParsedResume,
 ) -> None:
     """
     Update the user's current candidate profile
     using information extracted from the uploaded resume.
     """
 
-    profile = db.query(
-        CandidateProfile
-    ).filter(
-        CandidateProfile.user_id
-        == current_user_id
-    ).first()
+    profile = (
+        db.query(CandidateProfile)
+        .filter(
+            CandidateProfile.user_id
+            == current_user_id
+        )
+        .first()
+    )
 
     first_name, last_name = _split_name(
-        info.get("name")
+        parsed.contact.name
     )
 
     if profile is None:
@@ -384,30 +497,30 @@ def _update_candidate_profile(
             profile.last_name = last_name
 
     phone = _safe_text(
-        info.get("phone")
+        parsed.contact.phone
     )
 
-    address = _safe_text(
-        info.get("address")
+    location = _safe_text(
+        parsed.contact.location
     )
 
     linkedin = _safe_text(
-        info.get("linkedin")
+        parsed.contact.linkedin
     )
 
     github = _safe_text(
-        info.get("github")
+        parsed.contact.github
     )
 
     portfolio = _safe_text(
-        info.get("portfolio")
+        parsed.contact.portfolio
     )
 
     if phone:
         profile.phone = phone
 
-    if address:
-        profile.location = address
+    if location:
+        profile.location = location
 
     if linkedin:
         profile.linkedin_url = linkedin
@@ -418,7 +531,6 @@ def _update_candidate_profile(
     if portfolio:
         profile.portfolio_url = portfolio
 
-
 def replace_resume_from_upload(
     *,
     db: Session,
@@ -427,19 +539,29 @@ def replace_resume_from_upload(
     file: UploadFile,
 ) -> dict[str, Any]:
     """
-    Parse an uploaded resume and replace the current resume state.
+    Parse an uploaded resume with the Groq-powered parser
+    and replace the current resume state.
 
     The complete operation is transactional:
-    - extraction happens first
+    - file is saved and text is extracted first
+    - Groq parses the extracted text
     - existing resume sections are replaced only after
-      extraction succeeds
-    - any database error rolls back to the previous state
+      parsing succeeds
+    - any database error rolls back the transaction
     """
 
     saved_path: Path | None = None
 
     try:
+        # ---------------------------------------------------------
+        # Save uploaded file
+        # ---------------------------------------------------------
+
         saved_path = _save_uploaded_file(file)
+
+        # ---------------------------------------------------------
+        # Extract raw text from PDF/DOCX
+        # ---------------------------------------------------------
 
         text = extract_text(
             str(saved_path)
@@ -454,35 +576,57 @@ def replace_resume_from_upload(
                 ),
             )
 
-        info = extract_basic_info(
+        # ---------------------------------------------------------
+        # AI-powered structured parsing
+        # ---------------------------------------------------------
+
+        parsed = parse_resume_with_groq(
             text
         )
 
-        info = normalize_resume_info(
-            info
-        )
+        # ---------------------------------------------------------
+        # Validate minimum required information
+        # ---------------------------------------------------------
 
-        if not info:
+        if not parsed.contact.name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unable to parse the uploaded resume.",
+                detail=(
+                    "Unable to determine candidate name "
+                    "from the uploaded resume."
+                ),
             )
+
+        # ---------------------------------------------------------
+        # Update candidate profile
+        # ---------------------------------------------------------
 
         _update_candidate_profile(
             db=db,
             current_user_id=current_user_id,
-            info=info,
+            parsed=parsed,
         )
+
+        # ---------------------------------------------------------
+        # Replace current resume sections
+        # ---------------------------------------------------------
 
         _replace_resume_sections(
             resume=resume,
-            info=info,
+            parsed=parsed,
         )
 
         resume.status = ResumeStatus.COMPLETED
 
-        # Force relationship deletions before inserts.
+        # ---------------------------------------------------------
+        # Force relationship deletions before inserts
+        # ---------------------------------------------------------
+
         db.flush()
+
+        # ---------------------------------------------------------
+        # Commit current resume state
+        # ---------------------------------------------------------
 
         db.commit()
         db.refresh(resume)
@@ -491,7 +635,7 @@ def replace_resume_from_upload(
             "message": "Resume uploaded and parsed successfully.",
             "resume_id": resume.id,
             "filename": file.filename,
-            "parsed": info,
+            "parsed": parsed.model_dump(),
         }
 
     except HTTPException:
@@ -507,6 +651,10 @@ def replace_resume_from_upload(
         ) from exc
 
     finally:
+        # ---------------------------------------------------------
+        # Delete temporary uploaded file
+        # ---------------------------------------------------------
+
         if saved_path is not None:
             try:
                 saved_path.unlink(
