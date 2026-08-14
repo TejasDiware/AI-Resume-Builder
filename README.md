@@ -126,3 +126,30 @@ backend/
 ├── alembic.ini
 ├── .env
 └── README.md
+
+
+
+This project is Dockerized, 
+
+The recommended setup is:
+
+```text
+GitHub Repository
+       ↓
+Clone Repository
+       ↓
+Create .env
+       ↓
+Docker Compose
+       ↓
+┌─────────────────────────────┐
+│ Backend Container            │
+│ FastAPI                      │
+│                              │
+│ PostgreSQL Container         │
+│ Database                     │
+└─────────────────────────────┘
+       ↓
+http://localhost:8000
+       ↓
+Swagger / Frontend
