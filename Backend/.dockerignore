@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.git/
+.gitignore
+.env
+uploads/
+*.log
+debug_resume.pdf
+classic_test.pdf
+modern_test.pdf
+professional_test.pdf

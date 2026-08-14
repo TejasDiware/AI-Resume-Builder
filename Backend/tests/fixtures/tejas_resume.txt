@@ -1,0 +1,42 @@
+TEJAS DIWARE
+tejasdiware1101@gmail.com | Pune, Maharashtra | +91-9545170847
+
+SKILLS
+Java 17+ Spring Boot Spring MVC
+Spring Data JPA REST APIs JSON
+DSA HTML CSS
+JavaScript Swing Basic knowledge of Docker and CI/CD
+Git GitHub JUnit/Mockito
+Maven/Gradle SQL (PostgreSQL/MySQL)
+
+INTERNSHIP
+WebCryptTechnology — Intern | Pune | 01/2024 – 02/2024
+• Developed an Employee Management System login using Java for backend operations, including user authentication and role-based access through a secure login page.
+
+Maharashtra State Commission for Backward Classes — Intern | Pune | 01/2024 – 02/2024
+• Sorted and organized 500+ files, spreadsheets, and reports.
+• Provided project progress updates and proposed solutions to issues.
+
+EDUCATION
+AISSMS IOIT — B.E. Electronics and Telecommunication | Pune | 2021 – 2025
+Shri Samarth Junior College, Akola — HSC, 94.83% | 2019 – 2021
+Jubilee English High School, Akola — SSC, 76.40% | 2019
+
+PROJECTS
+Chatting Application | Java, Swing, Socket Programming
+• Developed a real-time chat application using Java Swing with a client-server architecture and socket programming for message exchange.
+• Designed an intuitive GUI with active status updates, message formatting, and seamless communication.
+
+SmartBuy – Fashion-Focused Platform | HTML, CSS, JavaScript
+• Designed and developed a responsive e-commerce website featuring product browsing and checkout.
+• Implemented structured layouts, navigation menus, and dynamic styling to improve user experience and accessibility.
+
+Real Time Weapon Detection
+• Developed an intelligent surveillance system using computer vision and deep learning to detect weapons such as guns and knives in real-time video feeds.
+• Integrated YOLO-based object detection with live camera streams for rapid identification and alert generation, focusing on accuracy, low latency, and deployability.
+
+CERTIFICATION
+Java Completion Certificate — 30Dayscode
+
+ADDITIONAL
+Interests: Cricket, Football, Movies, Gaming, Finances
