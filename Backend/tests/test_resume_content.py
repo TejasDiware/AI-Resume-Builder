@@ -178,8 +178,16 @@ def test_generate_resume_content(client):
             "resume-content@example.com",
         )
 
+        resume = create_resume(
+            client,
+            token,
+            "Resume Content Test",
+        )
+
+        assert resume["id"]
+
         response = client.post(
-            "/api/v1/ai/generate-resume-content",
+            f"/api/v1/ai/generate-resume-content/{resume['id']}",
             headers=auth_headers(token),
             json={
                 "prompt": (
@@ -268,8 +276,6 @@ def test_generate_resume_content_returns_ai_changes(
             "resume-content-changes@example.com",
         )
 
-        # Create a resume so the API can build
-        # generation_context.
         resume = create_resume(
             client,
             token,
@@ -279,7 +285,7 @@ def test_generate_resume_content_returns_ai_changes(
         assert resume["id"]
 
         response = client.post(
-            "/api/v1/ai/generate-resume-content",
+            f"/api/v1/ai/generate-resume-content/{resume['id']}",
             headers=auth_headers(token),
             json={
                 "prompt": (
@@ -293,10 +299,6 @@ def test_generate_resume_content_returns_ai_changes(
 
         data = response.json()
 
-        # ---------------------------------------------------------
-        # Basic response validation
-        # ---------------------------------------------------------
-
         assert "summary" in data
         assert "service_history" in data
         assert "project" in data
@@ -309,14 +311,10 @@ def test_generate_resume_content_returns_ai_changes(
 
         changes = data["changes"]
 
-        # ---------------------------------------------------------
-        # Verify that changes were generated
-        # ---------------------------------------------------------
-
         assert len(changes) >= 1
 
         # ---------------------------------------------------------
-        # Verify summary change
+        # Summary change
         # ---------------------------------------------------------
 
         summary_changes = [
@@ -341,7 +339,7 @@ def test_generate_resume_content_returns_ai_changes(
         assert summary_change["reason"]
 
         # ---------------------------------------------------------
-        # Verify project create change
+        # Project create change
         # ---------------------------------------------------------
 
         project_changes = [
@@ -386,7 +384,7 @@ def test_generate_resume_content_requires_authentication(
     client,
 ):
     response = client.post(
-        "/api/v1/ai/generate-resume-content",
+        "/api/v1/ai/generate-resume-content/999999",
         json={
             "prompt": (
                 "I have 1 year of experience in machine learning."
@@ -403,8 +401,14 @@ def test_generate_resume_content_missing_prompt(client):
         "resume-content-missing@example.com",
     )
 
+    resume = create_resume(
+        client,
+        token,
+        "Missing Prompt Resume",
+    )
+
     response = client.post(
-        "/api/v1/ai/generate-resume-content",
+        f"/api/v1/ai/generate-resume-content/{resume['id']}",
         headers=auth_headers(token),
         json={},
     )
@@ -418,8 +422,14 @@ def test_generate_resume_content_empty_prompt(client):
         "resume-content-empty@example.com",
     )
 
+    resume = create_resume(
+        client,
+        token,
+        "Empty Prompt Resume",
+    )
+
     response = client.post(
-        "/api/v1/ai/generate-resume-content",
+        f"/api/v1/ai/generate-resume-content/{resume['id']}",
         headers=auth_headers(token),
         json={
             "prompt": "",
@@ -435,8 +445,14 @@ def test_generate_resume_content_whitespace_prompt(client):
         "resume-content-whitespace@example.com",
     )
 
+    resume = create_resume(
+        client,
+        token,
+        "Whitespace Prompt Resume",
+    )
+
     response = client.post(
-        "/api/v1/ai/generate-resume-content",
+        f"/api/v1/ai/generate-resume-content/{resume['id']}",
         headers=auth_headers(token),
         json={
             "prompt": "   ",
@@ -467,8 +483,14 @@ def test_generate_resume_content_ai_service_failure(client):
             "resume-content-failure@example.com",
         )
 
+        resume = create_resume(
+            client,
+            token,
+            "AI Failure Resume",
+        )
+
         response = client.post(
-            "/api/v1/ai/generate-resume-content",
+            f"/api/v1/ai/generate-resume-content/{resume['id']}",
             headers=auth_headers(token),
             json={
                 "prompt": (
@@ -503,8 +525,14 @@ def test_generate_resume_content_optional_dynamic_prompt(
             "resume-content-dynamic@example.com",
         )
 
+        resume = create_resume(
+            client,
+            token,
+            "Dynamic Prompt Resume",
+        )
+
         response = client.post(
-            "/api/v1/ai/generate-resume-content",
+            f"/api/v1/ai/generate-resume-content/{resume['id']}",
             headers=auth_headers(token),
             json={
                 "prompt": (
@@ -530,3 +558,39 @@ def test_generate_resume_content_optional_dynamic_prompt(
             get_ai_service,
             None,
         )
+
+
+def test_generate_resume_content_cannot_access_another_users_resume(
+    client,
+):
+    owner_token = register_and_login(
+        client,
+        "resume-content-owner@example.com",
+    )
+
+    resume = create_resume(
+        client,
+        owner_token,
+        "Owner Resume",
+    )
+
+    other_user_token = register_and_login(
+        client,
+        "resume-content-other@example.com",
+    )
+
+    response = client.post(
+        f"/api/v1/ai/generate-resume-content/{resume['id']}",
+        headers=auth_headers(other_user_token),
+        json={
+            "prompt": (
+                "Generate machine learning resume content."
+            ),
+        },
+    )
+
+    assert response.status_code == 404
+
+    assert response.json()["detail"] == (
+        "Resume not found"
+    )

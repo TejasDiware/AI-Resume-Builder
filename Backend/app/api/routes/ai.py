@@ -284,42 +284,35 @@ def generate_service_history(
         )
 
 @router.post(
-    "/generate-resume-content",
+    "/generate-resume-content/{resume_id}",
     response_model=GenerateResumeContentResponse,
 )
 def generate_resume_content(
+    resume_id: int,
     request: GenerateResumeContentRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     ai_service: AIService = Depends(get_ai_service),
 ):
-    try:
-        # ---------------------------------------------------------
-        # Find the user's resume.
-        #
-        # Resume context is optional for this endpoint because
-        # Generate Resume Content was originally designed to work
-        # without requiring an existing resume.
-        # ---------------------------------------------------------
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
 
-        resume = db.scalar(
-            select(Resume)
-            .where(
-                Resume.user_id == current_user.id,
-            )
-            .order_by(
-                Resume.id.desc(),
-            )
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
         )
 
-        generation_context = None
-
-        if resume is not None:
-            generation_context = build_resume_generation_context(
-                resume=resume,
-                current_user=current_user,
-                db=db,
-            )
+    try:
+        generation_context = build_resume_generation_context(
+            resume=resume,
+            current_user=current_user,
+            db=db,
+        )
 
         return ai_service.generate_resume_content(
             prompt_input=request.prompt,
