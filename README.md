@@ -6,4 +6,4 @@ An AI-powered resume builder that helps candidates create professional, ATS-frie
 
 - `backend/` - FastAPI backend
 - `frontend/` - React frontend
-- `docs/` - Project documentation
+- `docs/` - Project documentationdocker compose up -d

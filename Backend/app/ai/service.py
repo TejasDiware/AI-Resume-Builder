@@ -1,64 +1,50 @@
-from app.ai.prompts import (
-    PROJECT_IMPROVEMENT_PROMPT,
-    RESUME_TEXT_IMPROVEMENT_PROMPT,
-)
-
-from app.ai.prompts import (
-    SERVICE_HISTORY_GENERATION_PROMPT,
-)
-
-from app.ai.prompts import (
-    GENERATE_RESUME_CONTENT_PROMPT,
-)
-
-import json
-from app.quality.schemas import AIResumeQualityResponse
-
-
-from app.ai.resume_formatter import format_resume_text
-from app.ai.prompts import (
-    STRUCTURED_RESUME_GENERATION_PROMPT,
-)
-
-from app.ai.prompts import AI_RESUME_QUALITY_PROMPT
-from app.ai.jd_schemas import JobDescriptionAnalysis
-from app.ai.prompts import JOB_DESCRIPTION_ANALYSIS_PROMPT
-from app.ats.schemas import ATSOptimizationResponse
-from app.ai.prompts import ATS_OPTIMIZATION_PROMPT
-
-from app.ats.schemas import OptimizeSectionResponse
-from app.ai.prompts import SECTION_OPTIMIZATION_PROMPT
-
-
-from app.ai.provider import LLMProvider
-from app.ai.schemas import (
-    ImproveProjectResponse,
-    ImproveTextResponse,
-    ImproveExperienceResponse,
-    ImproveSummaryResponse,
-    GeneratedResumeResponse,
-    GeneratedResumeContent,
-    GeneratedTailoredContent,
-    TailoredResumeResponse,
-    GenerateServiceHistoryResponse,
-    GenerateResumeContentResponse,
-    GeneratedResumeProject,
-)
-
-from app.ai.prompts import (
-    EXPERIENCE_IMPROVEMENT_PROMPT,
-    PROJECT_IMPROVEMENT_PROMPT,
-    RESUME_TEXT_IMPROVEMENT_PROMPT,
-    SUMMARY_IMPROVEMENT_PROMPT,
-    FULL_RESUME_PROMPT,
-    TAILORED_RESUME_PROMPT,
-    STRUCTURED_TAILORED_RESUME_PROMPT,
-    STRUCTURED_RESUME_GENERATION_PROMPT,
-
-)
-
 import json
 import re
+
+from app.ai.jd_schemas import JobDescriptionAnalysis
+
+from app.ai.prompts import (
+    AI_RESUME_QUALITY_PROMPT,
+    ATS_OPTIMIZATION_PROMPT,
+    EXPERIENCE_IMPROVEMENT_PROMPT,
+    FULL_RESUME_PROMPT,
+    GENERATE_RESUME_CONTENT_PROMPT,
+    JOB_DESCRIPTION_ANALYSIS_PROMPT,
+    PROJECT_IMPROVEMENT_PROMPT,
+    RESUME_TEXT_IMPROVEMENT_PROMPT,
+    SECTION_OPTIMIZATION_PROMPT,
+    SERVICE_HISTORY_GENERATION_PROMPT,
+    STRUCTURED_RESUME_GENERATION_PROMPT,
+    STRUCTURED_TAILORED_RESUME_PROMPT,
+    SUMMARY_IMPROVEMENT_PROMPT,
+    TAILORED_RESUME_PROMPT,
+)
+
+from app.ai.provider import LLMProvider
+
+from app.ai.resume_formatter import format_resume_text
+
+from app.ai.schemas import (
+    AIChange,
+    GeneratedResumeContent,
+    GeneratedResumeProject,
+    GeneratedResumeResponse,
+    GeneratedTailoredContent,
+    GenerateResumeContentResponse,
+    GenerateServiceHistoryResponse,
+    ImproveExperienceResponse,
+    ImproveProjectResponse,
+    ImproveSummaryResponse,
+    ImproveTextResponse,
+    TailoredResumeResponse,
+)
+
+from app.ats.schemas import (
+    ATSOptimizationResponse,
+    OptimizeSectionResponse,
+)
+
+from app.quality.schemas import AIResumeQualityResponse
 
 FORBIDDEN_RESUME_PLACEHOLDERS = (
     "https://example.com/",
@@ -233,9 +219,13 @@ class AIService:
         )
 
     def generate_resume_content(
-        self,
-        prompt_input: str,
-    ) -> GenerateResumeContentResponse:
+            self,
+            prompt_input: str,
+            generation_context: dict | None = None,
+        ) -> GenerateResumeContentResponse:
+
+
+        generation_context = generation_context or {}
 
         prompt = GENERATE_RESUME_CONTENT_PROMPT.format(
             prompt=prompt_input,
@@ -246,7 +236,10 @@ class AIService:
         try:
             data = parse_json_response(raw_response)
 
-            project_data = data.get("project", {})
+            project_data = data.get(
+                "project",
+                {},
+            )
 
             if not isinstance(project_data, dict):
                 raise ValueError(
@@ -284,7 +277,10 @@ class AIService:
                 )
 
             summary = str(
-                data.get("summary", "")
+                data.get(
+                    "summary",
+                    "",
+                )
             ).strip()
 
             service_history = [
@@ -333,17 +329,146 @@ class AIService:
                 description=description,
             )
 
+            # ---------------------------------------------------------
+            # Build reviewable AI changes.
+            #
+            # Nothing is saved to the database here.
+            # These are only proposals for the user to review.
+            # ---------------------------------------------------------
+
+            changes = []
+
+            # ---------------------------------------------------------
+            # SUMMARY CHANGE
+            # ---------------------------------------------------------
+
+            current_summary = (
+                generation_context
+                .get("profile", {})
+                .get("summary", "")
+            )
+
+            current_summary = (
+                current_summary.strip()
+                if current_summary
+                else ""
+            )
+
+            if summary != current_summary:
+                changes.append(
+                    AIChange(
+                        id="generate_summary_001",
+                        action="update",
+                        section="summary",
+                        target_id=None,
+                        old_content=current_summary,
+                        new_content=summary,
+                        reason=(
+                            "AI generated a new professional summary "
+                            "based on the user's request."
+                        ),
+                    )
+                )
+
+            # ---------------------------------------------------------
+            # EXPERIENCE / SERVICE HISTORY CHANGE
+            # ---------------------------------------------------------
+
+            experience_records = generation_context.get(
+                "experience",
+                []
+            )
+
+            if experience_records:
+                # The current Generate Resume Content API does not
+                # specify an experience ID, so the first existing
+                # experience is used as the proposal target.
+                #
+                # We can make this target explicit later if the
+                # frontend allows the user to select an experience.
+                experience = experience_records[0]
+
+                experience_id = experience.get("id")
+
+                current_description = (
+                    experience.get(
+                        "description",
+                        "",
+                    )
+                    or ""
+                ).strip()
+
+                generated_description = "\n".join(
+                    service_history
+                ).strip()
+
+                if (
+                    experience_id is not None
+                    and generated_description
+                    != current_description
+                ):
+                    changes.append(
+                        AIChange(
+                            id=(
+                                f"generate_experience_"
+                                f"{experience_id}_001"
+                            ),
+                            action="update",
+                            section="experience",
+                            target_id=experience_id,
+                            old_content=current_description,
+                            new_content=generated_description,
+                            reason=(
+                                "AI generated service history "
+                                "based on the user's request."
+                            ),
+                        )
+                    )
+
+            # ---------------------------------------------------------
+            # PROJECT CREATE CHANGE
+            # ---------------------------------------------------------
+
+            project_description = "\n".join(
+                description
+            ).strip()
+
+            project_data_for_change = {
+                "title": project.title,
+                "role": "",
+                "technologies": ", ".join(
+                    project.technologies
+                ),
+                "description": project_description,
+            }
+
+            changes.append(
+                AIChange(
+                    id="generate_project_001",
+                    action="create",
+                    section="project",
+                    target_id=None,
+                    old_content=None,
+                    new_content=project_description,
+                    data=project_data_for_change,
+                    reason=(
+                        "AI generated a new project based "
+                        "on the user's request."
+                    ),
+                )
+            )
+
             return GenerateResumeContentResponse(
                 summary=summary,
                 service_history=service_history,
                 project=project,
+                changes=changes,
             )
 
         except (ValueError, TypeError, KeyError) as exc:
             raise RuntimeError(
                 "AI returned invalid resume content"
             ) from exc
-
 
 
     def generate_resume(
@@ -546,40 +671,233 @@ class AIService:
         experience: str,
         projects: str,
         job_description: str,
+        generation_context: dict | None = None,
     ) -> ATSOptimizationResponse:
+
+        import json
+
+        generation_context = (
+            generation_context
+            if generation_context is not None
+            else {}
+        )
 
         prompt = ATS_OPTIMIZATION_PROMPT.format(
             score=score,
-            matched_skills=", ".join(matched_skills),
-            missing_skills=", ".join(missing_skills),
-            matched_keywords=", ".join(matched_keywords),
-            missing_keywords=", ".join(missing_keywords),
+            matched_skills=json.dumps(
+                matched_skills,
+                ensure_ascii=False,
+            ),
+            missing_skills=json.dumps(
+                missing_skills,
+                ensure_ascii=False,
+            ),
+            matched_keywords=json.dumps(
+                matched_keywords,
+                ensure_ascii=False,
+            ),
+            missing_keywords=json.dumps(
+                missing_keywords,
+                ensure_ascii=False,
+            ),
             profile=profile,
             experience=experience,
             projects=projects,
             job_description=job_description,
+            structured_resume=json.dumps(
+                {
+                    "profile": generation_context.get(
+                        "profile",
+                        {},
+                    ),
+                    "experience": generation_context.get(
+                        "experience",
+                        [],
+                    ),
+                    "projects": generation_context.get(
+                        "projects",
+                        [],
+                    ),
+                    "skills": generation_context.get(
+                        "skills",
+                        [],
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
         )
 
         raw_response = self.provider.generate(prompt)
 
         try:
-            data = json.loads(raw_response)
+            data = parse_json_response(raw_response)
 
-            return ATSOptimizationResponse(
-                resume_id=resume_id,
-                job_description_id=job_description_id,
-                current_score=score,
-                priority=data.get("priority", []),
-                recommendations=data.get(
-                    "recommendations",
-                    [],
-                ),
+        except ValueError as exc:
+            raise RuntimeError(
+                "AI returned invalid ATS optimization JSON"
+            ) from exc
+
+        priority = data.get(
+            "priority",
+            [],
+        )
+
+        recommendations = data.get(
+            "recommendations",
+            [],
+        )
+
+        raw_changes = data.get(
+            "changes",
+            [],
+        )
+
+        if not isinstance(priority, list):
+            priority = []
+
+        if not isinstance(recommendations, list):
+            recommendations = []
+
+        if not isinstance(raw_changes, list):
+            raw_changes = []
+
+        # ---------------------------------------------------------
+        # Validate AI changes against the actual resume.
+        #
+        # AI is NOT trusted to invent IDs.
+        # ---------------------------------------------------------
+
+        valid_experience_ids = {
+            item["id"]
+            for item in generation_context.get(
+                "experience",
+                [],
+            )
+            if item.get("id") is not None
+        }
+
+        valid_project_ids = {
+            item["id"]
+            for item in generation_context.get(
+                "projects",
+                [],
+            )
+            if item.get("id") is not None
+        }
+
+        valid_changes: list[AIChange] = []
+
+        for index, change in enumerate(raw_changes):
+            if not isinstance(change, dict):
+                continue
+
+            action = change.get("action")
+
+            section = change.get("section")
+
+            target_id = change.get("target_id")
+
+            new_content = (
+                change.get("new_content")
+                or ""
+            ).strip()
+
+            old_content = (
+                change.get("old_content")
+                or ""
+            ).strip()
+
+            reason = (
+                change.get("reason")
+                or "AI suggested this improvement."
+            ).strip()
+
+            # -----------------------------------------------------
+            # Only update existing experience records.
+            # -----------------------------------------------------
+
+            if section == "experience":
+                if action != "update":
+                    continue
+
+                if target_id not in valid_experience_ids:
+                    continue
+
+            # -----------------------------------------------------
+            # Only update existing project records.
+            # -----------------------------------------------------
+
+            elif section == "project":
+                if action != "update":
+                    continue
+
+                if target_id not in valid_project_ids:
+                    continue
+
+            # -----------------------------------------------------
+            # Summary has no target ID.
+            # -----------------------------------------------------
+
+            elif section == "summary":
+                if action != "update":
+                    continue
+
+                target_id = None
+
+            else:
+                continue
+
+            if not new_content:
+                continue
+
+            if old_content == new_content:
+                continue
+
+            change_id = (
+                change.get("id")
+                or (
+                    f"ats_"
+                    f"{section}_"
+                    f"{target_id if target_id is not None else 'summary'}_"
+                    f"{job_description_id}_"
+                    f"{index}"
+                )
             )
 
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise RuntimeError(
-                "AI returned an invalid ATS optimization response"
-            ) from exc
+            try:
+                valid_changes.append(
+                    AIChange(
+                        id=str(change_id),
+                        action=action,
+                        section=section,
+                        target_id=target_id,
+                        old_content=old_content,
+                        new_content=new_content,
+                        data=change.get("data"),
+                        reason=reason,
+                    )
+                )
+
+            except ValueError:
+                continue
+
+        return ATSOptimizationResponse(
+            resume_id=resume_id,
+            job_description_id=job_description_id,
+            current_score=score,
+            priority=[
+                str(item)
+                for item in priority
+                if str(item).strip()
+            ],
+            recommendations=[
+                str(item)
+                for item in recommendations
+                if str(item).strip()
+            ],
+            changes=valid_changes,
+        )
 
 
     def optimize_section(
@@ -591,34 +909,239 @@ class AIService:
         missing_skills: list[str],
         missing_keywords: list[str],
         instruction: str | None,
+        generation_context: dict | None = None,
     ) -> OptimizeSectionResponse:
 
-        prompt = SECTION_OPTIMIZATION_PROMPT.format(
+        import json
+
+        generation_context = (
+            generation_context
+            if generation_context is not None
+            else {}
+        )
+
+        prompt = OPTIMIZE_SECTION_PROMPT.format(
             section=section,
             original_content=original_content,
             job_description=job_description,
-            missing_skills=", ".join(missing_skills),
-            missing_keywords=", ".join(missing_keywords),
+            missing_skills=json.dumps(
+                missing_skills,
+                ensure_ascii=False,
+            ),
+            missing_keywords=json.dumps(
+                missing_keywords,
+                ensure_ascii=False,
+            ),
             instruction=instruction or "",
+            structured_resume=json.dumps(
+                {
+                    "profile": generation_context.get(
+                        "profile",
+                        {},
+                    ),
+                    "experience": generation_context.get(
+                        "experience",
+                        [],
+                    ),
+                    "projects": generation_context.get(
+                        "projects",
+                        [],
+                    ),
+                    "skills": generation_context.get(
+                        "skills",
+                        [],
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
         )
 
         raw_response = self.provider.generate(prompt)
 
         try:
-            data = json.loads(raw_response)
+            data = parse_json_response(raw_response)
 
-            return OptimizeSectionResponse(
-                resume_id=resume_id,
-                section=section,
-                original_content=original_content,
-                optimized_content=data["optimized_content"],
-                changes=data.get("changes", []),
+        except ValueError as exc:
+            raise RuntimeError(
+                "AI returned invalid section optimization JSON"
+            ) from exc
+
+        optimized_content = (
+            data.get("optimized_content")
+            or original_content
+        ).strip()
+
+        raw_changes = data.get(
+            "changes",
+            [],
+        )
+
+        if not isinstance(raw_changes, list):
+            raw_changes = []
+
+        # ---------------------------------------------------------
+        # Resolve valid database IDs.
+        # ---------------------------------------------------------
+
+        experience_map = {
+            item["id"]: item
+            for item in generation_context.get(
+                "experience",
+                [],
+            )
+            if item.get("id") is not None
+        }
+
+        project_map = {
+            item["id"]: item
+            for item in generation_context.get(
+                "projects",
+                [],
+            )
+            if item.get("id") is not None
+        }
+
+        valid_changes: list[AIChange] = []
+
+        for index, change in enumerate(raw_changes):
+            if not isinstance(change, dict):
+                continue
+
+            action = change.get("action")
+
+            change_section = change.get(
+                "section",
+                section,
             )
 
-        except (json.JSONDecodeError, KeyError, ValueError) as exc:
-            raise RuntimeError(
-                "AI returned an invalid section optimization response"
-            ) from exc
+            target_id = change.get(
+                "target_id"
+            )
+
+            new_content = (
+                change.get("new_content")
+                or ""
+            ).strip()
+
+            old_content = (
+                change.get("old_content")
+                or ""
+            ).strip()
+
+            reason = (
+                change.get("reason")
+                or "AI suggested this section improvement."
+            ).strip()
+
+            if action not in {
+                "create",
+                "update",
+            }:
+                continue
+
+            # -----------------------------------------------------
+            # Experience
+            # -----------------------------------------------------
+
+            if change_section == "experience":
+                if action != "update":
+                    continue
+
+                if target_id not in experience_map:
+                    continue
+
+            # -----------------------------------------------------
+            # Project
+            # -----------------------------------------------------
+
+            elif change_section == "project":
+                if action != "update":
+                    continue
+
+                if target_id not in project_map:
+                    continue
+
+            # -----------------------------------------------------
+            # Summary
+            # -----------------------------------------------------
+
+            elif change_section == "summary":
+                if action != "update":
+                    continue
+
+                target_id = None
+
+            else:
+                continue
+
+            if not new_content:
+                continue
+
+            if old_content == new_content:
+                continue
+
+            change_id = (
+                change.get("id")
+                or (
+                    f"ats_section_"
+                    f"{change_section}_"
+                    f"{target_id if target_id is not None else 'summary'}_"
+                    f"{resume_id}_"
+                    f"{index}"
+                )
+            )
+
+            try:
+                valid_changes.append(
+                    AIChange(
+                        id=str(change_id),
+                        action=action,
+                        section=change_section,
+                        target_id=target_id,
+                        old_content=old_content,
+                        new_content=new_content,
+                        data=change.get("data"),
+                        reason=reason,
+                    )
+                )
+
+            except ValueError:
+                continue
+
+        # ---------------------------------------------------------
+        # If the AI did not explicitly return changes but produced
+        # different content for summary, create a reviewable change.
+        # ---------------------------------------------------------
+
+        if (
+            not valid_changes
+            and section == "summary"
+            and optimized_content
+            and optimized_content != original_content.strip()
+        ):
+            valid_changes.append(
+                AIChange(
+                    id=f"ats_section_summary_{resume_id}",
+                    action="update",
+                    section="summary",
+                    target_id=None,
+                    old_content=original_content.strip(),
+                    new_content=optimized_content,
+                    reason=(
+                        "AI optimized the resume summary "
+                        "for the selected job description."
+                    ),
+                )
+            )
+
+        return OptimizeSectionResponse(
+            resume_id=resume_id,
+            section=section,
+            original_content=original_content,
+            optimized_content=optimized_content,
+            changes=valid_changes,
+        )
 
 
     def generate_tailored_resume(
@@ -652,25 +1175,23 @@ class AIService:
             instruction=instruction or "",
         )
 
-        raw_response = self.provider.generate(
-            prompt
-        )
+        raw_response = self.provider.generate(prompt)
 
         try:
-            data = parse_json_response(
-                raw_response
-            )
+            data = parse_json_response(raw_response)
 
-            tailored = (
-                GeneratedTailoredContent.model_validate(
-                    data
-                )
+            tailored = GeneratedTailoredContent.model_validate(
+                data
             )
 
         except ValueError as exc:
             raise RuntimeError(
                 "AI returned invalid structured tailored resume content"
             ) from exc
+
+        # ---------------------------------------------------------
+        # Existing resume records
+        # ---------------------------------------------------------
 
         experience_map = {
             item["id"]: item
@@ -682,6 +1203,10 @@ class AIService:
             for item in generation_context["projects"]
         }
 
+        # ---------------------------------------------------------
+        # AI-generated experience updates
+        # ---------------------------------------------------------
+
         updated_experience = {
             item.id: item.description.strip()
             for item in tailored.experience
@@ -689,12 +1214,20 @@ class AIService:
             and item.description.strip()
         }
 
+        # ---------------------------------------------------------
+        # AI-generated project updates
+        # ---------------------------------------------------------
+
         updated_projects = {
             item.id: item.description.strip()
             for item in tailored.projects
             if item.id in project_map
             and item.description.strip()
         }
+
+        # ---------------------------------------------------------
+        # Build formatted experience records
+        # ---------------------------------------------------------
 
         experience_records = []
 
@@ -709,6 +1242,10 @@ class AIService:
                 }
             )
 
+        # ---------------------------------------------------------
+        # Build formatted project records
+        # ---------------------------------------------------------
+
         project_records = []
 
         for item in generation_context["projects"]:
@@ -722,14 +1259,141 @@ class AIService:
                 }
             )
 
-        summary = (
-            tailored.summary.strip()
-            if tailored.summary.strip()
-            else generation_context["profile"].get(
+        # ---------------------------------------------------------
+        # Summary
+        # ---------------------------------------------------------
+
+        current_summary = (
+            generation_context["profile"].get(
                 "summary",
                 "",
             )
+            or ""
+        ).strip()
+
+        summary = (
+            tailored.summary.strip()
+            if tailored.summary.strip()
+            else current_summary
         )
+
+        # ---------------------------------------------------------
+        # Build reviewable AI changes
+        #
+        # IMPORTANT:
+        # Nothing is saved here.
+        #
+        # These are proposals only.
+        # The frontend will display them to the user.
+        # ---------------------------------------------------------
+
+        changes: list[AIChange] = []
+
+        # =========================================================
+        # SUMMARY CHANGE
+        # =========================================================
+
+        if summary and summary != current_summary:
+            changes.append(
+                AIChange(
+                    id=(
+                        f"tailored_summary_"
+                        f"{resume_id}_"
+                        f"{job_description_id}"
+                    ),
+                    action="update",
+                    section="summary",
+                    target_id=None,
+                    old_content=current_summary,
+                    new_content=summary,
+                    reason=(
+                        "AI tailored the resume summary to better "
+                        "match the selected job description."
+                    ),
+                )
+            )
+
+        # =========================================================
+        # EXPERIENCE CHANGES
+        # =========================================================
+
+        for experience_id, new_description in (
+            updated_experience.items()
+        ):
+            original = experience_map[experience_id]
+
+            old_description = (
+                original.get(
+                    "description",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if new_description == old_description:
+                continue
+
+            changes.append(
+                AIChange(
+                    id=(
+                        f"tailored_experience_"
+                        f"{experience_id}_"
+                        f"{job_description_id}"
+                    ),
+                    action="update",
+                    section="experience",
+                    target_id=experience_id,
+                    old_content=old_description,
+                    new_content=new_description,
+                    reason=(
+                        "AI tailored the service history to emphasize "
+                        "experience relevant to the selected job description."
+                    ),
+                )
+            )
+
+        # =========================================================
+        # PROJECT CHANGES
+        # =========================================================
+
+        for project_id, new_description in (
+            updated_projects.items()
+        ):
+            original = project_map[project_id]
+
+            old_description = (
+                original.get(
+                    "description",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if new_description == old_description:
+                continue
+
+            changes.append(
+                AIChange(
+                    id=(
+                        f"tailored_project_"
+                        f"{project_id}_"
+                        f"{job_description_id}"
+                    ),
+                    action="update",
+                    section="project",
+                    target_id=project_id,
+                    old_content=old_description,
+                    new_content=new_description,
+                    reason=(
+                        "AI tailored the project description to better "
+                        "align with the selected job description."
+                    ),
+                )
+            )
+
+        # ---------------------------------------------------------
+        # Format final preview
+        # ---------------------------------------------------------
 
         content = format_resume_text(
             profile=generation_context["profile"],
@@ -743,7 +1407,8 @@ class AIService:
             ],
             languages=[
                 (
-                    f"{item['name']} ({item['proficiency']})"
+                    f"{item['name']} "
+                    f"({item['proficiency']})"
                     if item["proficiency"]
                     else item["name"]
                 )
@@ -756,11 +1421,30 @@ class AIService:
             ],
         )
 
+        if not content.strip():
+            raise RuntimeError(
+                "Generated tailored resume content is empty"
+            )
+
         return TailoredResumeResponse(
             resume_id=resume_id,
             job_description_id=job_description_id,
             content=content,
-            structured=None,
+            structured=TailoredResumeContent(
+                summary=summary,
+                skills=generation_context["skills"],
+                experience=[
+                    item["description"]
+                    for item in experience_records
+                    if item["description"]
+                ],
+                projects=[
+                    item["description"]
+                    for item in project_records
+                    if item["description"]
+                ],
+            ),
+            changes=changes,
         )
 
 

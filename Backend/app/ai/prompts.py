@@ -248,27 +248,93 @@ Job description:
 ATS_OPTIMIZATION_PROMPT = """
 You are an expert resume optimization assistant.
 
-Analyze the ATS evaluation below and provide actionable resume improvement
-recommendations for the candidate.
+Analyze the ATS evaluation and the candidate's resume below.
+
+Your job is to:
+1. Explain the most important optimization priorities.
+2. Provide concise recommendations.
+3. Generate concrete, reviewable resume changes when a legitimate
+   improvement can be made.
 
 STRICT RULES:
+
 - Never invent skills, technologies, achievements, metrics, companies,
-  responsibilities, or experience.
+  responsibilities, education, certifications, projects, or experience.
 - Never tell the candidate to claim a skill they do not have.
-- Missing skills must be clearly labeled as missing.
-- Suggest adding a missing skill ONLY if the candidate genuinely has it.
-- Focus on improvements that can increase relevance to the job description.
-- Prioritize the most important improvements first.
-- Be concise and practical.
+- Missing skills must remain clearly identified as missing.
+- Suggest a missing skill only when the candidate's existing resume
+  provides evidence that they genuinely have that skill.
+- Never invent a database ID.
+- For experience changes, target_id MUST be an ID from
+  structured_resume.experience.
+- For project changes, target_id MUST be an ID from
+  structured_resume.projects.
+- For summary changes, target_id MUST be null.
+- Never create an experience or project merely to fill a missing skill.
+- Never change company names, job titles, dates, institutions,
+  certification names, URLs, or other factual identity information.
+- Only rewrite existing prose content when the change is supported
+  by the candidate's existing resume.
+- Preserve the candidate's original meaning and factual claims.
+- Do not add unsupported metrics or achievements.
+- Do not make unnecessary changes.
+- If no safe concrete change can be proposed, return an empty changes
+  array.
+- The changes are proposals only. Do not assume they have been applied.
 - Return ONLY valid JSON.
 - Do not use markdown fences.
+
+IMPORTANT:
+
+The frontend will show each item in "changes" to the user.
+
+The user will be able to ACCEPT or REJECT each change.
+
+Therefore every change must contain enough information for the
+application to apply it without asking the user for another instruction.
 
 Return exactly:
 
 {{
   "priority": [],
-  "recommendations": []
+  "recommendations": [],
+  "changes": []
 }}
+
+Each item in "changes" must have exactly this structure:
+
+{{
+  "id": "unique-change-id",
+  "action": "update",
+  "section": "summary | experience | project",
+  "target_id": null,
+  "old_content": "existing resume content",
+  "new_content": "improved resume content",
+  "reason": "why this change improves alignment with the job"
+}}
+
+TARGET ID RULES:
+
+- summary:
+  target_id must be null.
+
+- experience:
+  target_id must be the exact numeric ID from
+  structured_resume.experience.
+
+- project:
+  target_id must be the exact numeric ID from
+  structured_resume.projects.
+
+Do NOT invent IDs.
+
+For experience and project changes:
+old_content must correspond to the existing record identified by target_id.
+
+new_content must be a factual improvement of that existing content.
+
+Do not create changes for skills unless the application provides a
+verified skill record and the change can be safely applied.
 
 ATS Score:
 {score}
@@ -294,6 +360,9 @@ Resume Experience:
 Resume Projects:
 {projects}
 
+Structured Resume:
+{structured_resume}
+
 Job Description:
 {job_description}
 """
@@ -305,25 +374,75 @@ You are an expert resume optimization assistant.
 
 Improve ONLY the requested resume section for the target job.
 
+The candidate must remain completely truthful.
+
 STRICT RULES:
+
 - Preserve all factual information.
 - Never invent technologies, metrics, achievements, responsibilities,
-  companies, dates, users, or results.
+  companies, dates, users, clients, team sizes, or results.
+- Never tell the candidate to claim a skill they do not have.
 - Do not add missing skills unless they are already supported by the
   candidate's provided information.
 - Improve clarity, relevance, wording, and ATS alignment.
 - Naturally incorporate relevant job-description terminology only when
-  it accurately describes the candidate's experience.
-- Do not change facts.
+  it accurately describes the candidate's existing experience.
+- Do not change factual information.
+- Never invent database IDs.
+- For experience changes, target_id MUST be an exact ID from
+  structured_resume.experience.
+- For project changes, target_id MUST be an exact ID from
+  structured_resume.projects.
+- For summary changes, target_id MUST be null.
+- old_content must correspond to the actual existing content.
+- new_content must remain factually supported by the original content.
+- Do not create experience or project records unless explicitly supported.
+- If no safe improvement can be made, return an empty changes array.
+- The changes are proposals only and have NOT been applied.
 - Return ONLY valid JSON.
 - Do not use markdown fences.
+- Do not include explanations outside the JSON.
+
+The frontend will display the changes to the user.
+
+The user can ACCEPT or REJECT each individual change.
+
+Therefore each change must contain enough information for the application
+to apply it without asking the user for another instruction.
 
 Return exactly:
 
 {{
-  "optimized_content": "string",
+  "optimized_content": "",
   "changes": []
 }}
+
+Each item in "changes" must have exactly this structure:
+
+{{
+  "id": "unique-change-id",
+  "action": "update",
+  "section": "summary | experience | project",
+  "target_id": null,
+  "old_content": "existing resume content",
+  "new_content": "improved resume content",
+  "reason": "why this change improves alignment with the job"
+}}
+
+TARGET ID RULES:
+
+- summary:
+  target_id must be null.
+
+- experience:
+  target_id must be the exact numeric ID from
+  structured_resume.experience.
+
+- project:
+  target_id must be the exact numeric ID from
+  structured_resume.projects.
+
+Do NOT invent target IDs.
 
 Section:
 {section}
@@ -342,6 +461,9 @@ ATS missing keywords:
 
 Additional instruction:
 {instruction}
+
+Structured Resume:
+{structured_resume}
 """
 
 

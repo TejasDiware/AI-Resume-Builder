@@ -1,13 +1,25 @@
-from pydantic import BaseModel, Field
-
-from typing import Literal
-
-from pydantic import BaseModel, Field
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class ApplyAIChangeRequest(BaseModel):
+class AIChange(BaseModel):
+    """
+    A single AI-generated resume change proposed for user review.
+
+    The change is only a proposal until the user accepts it.
+    """
+
+    id: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    action: Literal[
+        "create",
+        "update",
+    ]
+
     section: Literal[
         "summary",
         "experience",
@@ -21,10 +33,43 @@ class ApplyAIChangeRequest(BaseModel):
 
     target_id: int | None = None
 
-    content: str = Field(
+    old_content: str | None = None
+
+    new_content: str = ""
+
+    data: dict[str, Any] | None = None
+
+    reason: str = Field(
         min_length=1,
+        max_length=2000,
+    )
+
+
+class ApplyAIChangeRequest(BaseModel):
+    action: Literal[
+        "create",
+        "update",
+    ] = "update"
+
+    section: Literal[
+        "summary",
+        "experience",
+        "project",
+        "skill",
+        "education",
+        "certification",
+        "language",
+        "achievement",
+    ]
+
+    target_id: int | None = None
+
+    content: str | None = Field(
+        default=None,
         max_length=10000,
     )
+
+    data: dict[str, Any] | None = None
 
 
 class ImproveTextRequest(BaseModel):
@@ -38,6 +83,7 @@ class ImproveTextResponse(BaseModel):
     original_text: str
     improved_text: str
 
+
 class ImproveProjectRequest(BaseModel):
     instruction: str | None = Field(
         default=None,
@@ -48,7 +94,7 @@ class ImproveProjectRequest(BaseModel):
 class ImproveProjectResponse(BaseModel):
     project_id: int
     original_description: str | None
-    improved_description: str   
+    improved_description: str
 
 
 class ImproveExperienceRequest(BaseModel):
@@ -61,7 +107,7 @@ class ImproveExperienceRequest(BaseModel):
 class ImproveExperienceResponse(BaseModel):
     experience_id: int
     original_description: str | None
-    improved_description: str   
+    improved_description: str
 
 
 class ImproveSummaryRequest(BaseModel):
@@ -73,9 +119,7 @@ class ImproveSummaryRequest(BaseModel):
 
 class ImproveSummaryResponse(BaseModel):
     original_summary: str | None
-    improved_summary: str 
-
-
+    improved_summary: str
 
 
 class GenerateResumeRequest(BaseModel):
@@ -104,9 +148,10 @@ class GeneratedResumeContent(BaseModel):
         default_factory=list
     )
 
+
 class GeneratedResumeResponse(BaseModel):
     resume_id: int
-    content: str       
+    content: str
 
 
 class GenerateAndSaveResumeResponse(BaseModel):
@@ -116,19 +161,12 @@ class GenerateAndSaveResumeResponse(BaseModel):
     content: str
 
 
-
-
 class TailoredResumeRequest(BaseModel):
     instruction: str | None = Field(
         default=None,
         max_length=2000,
     )
 
-
-class TailoredResumeResponse(BaseModel):
-    resume_id: int
-    job_description_id: int
-    content: str
 
 class GenerateAndSaveTailoredResumeResponse(BaseModel):
     resume_id: int
@@ -150,12 +188,21 @@ class TailoredResumeResponse(BaseModel):
     job_description_id: int
     content: str
     structured: TailoredResumeContent | None = None
+    changes: list[AIChange] = Field(
+        default_factory=list,
+    )
+
 
 class ApplyTailoredResumeRequest(BaseModel):
     summary: str | None = None
     skill_ids: list[int] = Field(default_factory=list)
-    experience_updates: dict[int, str] = Field(default_factory=dict)
-    project_updates: dict[int, str] = Field(default_factory=dict)
+    experience_updates: dict[int, str] = Field(
+        default_factory=dict
+    )
+    project_updates: dict[int, str] = Field(
+        default_factory=dict
+    )
+
 
 class GeneratedTailoredExperience(BaseModel):
     id: int
@@ -176,6 +223,7 @@ class GeneratedTailoredContent(BaseModel):
         default_factory=list
     )
 
+
 class GenerateServiceHistoryRequest(BaseModel):
     instruction: str | None = Field(
         default=None,
@@ -188,6 +236,7 @@ class GenerateServiceHistoryResponse(BaseModel):
     service_history: list[str] = Field(
         min_length=1,
     )
+
 
 class GenerateResumeContentRequest(BaseModel):
     prompt: str = Field(
@@ -218,7 +267,13 @@ class GeneratedResumeProject(BaseModel):
 
 class GenerateResumeContentResponse(BaseModel):
     summary: str
+
     service_history: list[str] = Field(
         default_factory=list,
     )
+
     project: GeneratedResumeProject
+
+    changes: list[AIChange] = Field(
+        default_factory=list,
+    )

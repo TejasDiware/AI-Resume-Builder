@@ -1,55 +1,169 @@
 from types import SimpleNamespace
 
 from app.api.routes.ai import get_ai_service
+from app.ai.schemas import AIChange
 from app.main import app
 
 from tests.test_resume import (
     auth_headers,
     register_and_login,
+    create_resume,
 )
 
 
 class FakeResumeContentAIService:
     def generate_resume_content(
         self,
-        prompt_input,
+        prompt_input: str,
+        generation_context: dict | None = None,
     ):
-        return SimpleNamespace(
-            summary=(
-                "Machine Learning Engineer with 1 year of hands-on "
-                "experience developing machine learning and NLP solutions."
-            ),
-            service_history=[
-                "Developed and implemented machine learning solutions using Python and Scikit-learn.",
-                "Worked with Natural Language Processing for processing and analyzing unstructured text data.",
-                "Performed text preprocessing including tokenization, stopword removal, stemming, and lemmatization.",
-                "Applied TF-IDF and Bag-of-Words techniques for feature extraction.",
-                "Developed sentiment analysis models to classify Positive, Negative, and Neutral text.",
-                "Trained and evaluated machine learning models using Accuracy, Precision, Recall, and F1-score.",
-                "Performed feature engineering and data preprocessing to improve model performance.",
-                "Used Pandas, NumPy, NLTK, spaCy, and Scikit-learn for ML and NLP tasks.",
+        generation_context = generation_context or {}
+
+        summary = (
+            "Machine Learning Engineer with 1 year of hands-on "
+            "experience developing machine learning and NLP solutions."
+        )
+
+        service_history = [
+            "Developed and implemented machine learning solutions using Python and Scikit-learn.",
+            "Worked with Natural Language Processing for processing and analyzing unstructured text data.",
+            "Performed text preprocessing including tokenization, stopword removal, stemming, and lemmatization.",
+            "Applied TF-IDF and Bag-of-Words techniques for feature extraction.",
+            "Developed sentiment analysis models to classify Positive, Negative, and Neutral text.",
+            "Trained and evaluated machine learning models using Accuracy, Precision, Recall, and F1-score.",
+            "Performed feature engineering and data preprocessing to improve model performance.",
+            "Used Pandas, NumPy, NLTK, spaCy, and Scikit-learn for ML and NLP tasks.",
+        ]
+
+        project = SimpleNamespace(
+            title="NLP-Based Sentiment Analysis System",
+            technologies=[
+                "Python",
+                "NLP",
+                "NLTK",
+                "spaCy",
+                "Scikit-learn",
+                "Pandas",
+                "NumPy",
+                "TF-IDF",
             ],
-            project=SimpleNamespace(
-                title="NLP-Based Sentiment Analysis System",
-                technologies=[
-                    "Python",
-                    "NLP",
-                    "NLTK",
-                    "spaCy",
-                    "Scikit-learn",
-                    "Pandas",
-                    "NumPy",
-                    "TF-IDF",
-                ],
-                description=[
-                    "Developed an NLP-based sentiment analysis system.",
-                    "Preprocessed text using tokenization, stopword removal, and lemmatization.",
-                    "Converted text into numerical features using TF-IDF.",
-                    "Trained machine learning classification models for sentiment analysis.",
-                    "Evaluated model performance using accuracy, precision, recall, and F1-score.",
-                    "Performed feature engineering and model experimentation.",
-                ],
-            ),
+            description=[
+                "Developed an NLP-based sentiment analysis system.",
+                "Preprocessed text using tokenization, stopword removal, and lemmatization.",
+                "Converted text into numerical features using TF-IDF.",
+                "Trained machine learning classification models for sentiment analysis.",
+                "Evaluated model performance using accuracy, precision, recall, and F1-score.",
+                "Performed feature engineering and model experimentation.",
+            ],
+        )
+
+        changes = []
+
+        # ---------------------------------------------------------
+        # Summary change
+        # ---------------------------------------------------------
+
+        profile = generation_context.get(
+            "profile",
+            {},
+        )
+
+        old_summary = (
+            profile.get("summary", "")
+            if isinstance(profile, dict)
+            else ""
+        )
+
+        changes.append(
+            AIChange(
+                id="generate_summary_001",
+                action="update",
+                section="summary",
+                target_id=None,
+                old_content=old_summary,
+                new_content=summary,
+                reason=(
+                    "Generated a resume summary based on the "
+                    "candidate's requested career direction."
+                ),
+            )
+        )
+
+        # ---------------------------------------------------------
+        # Experience change
+        # ---------------------------------------------------------
+
+        experience_records = generation_context.get(
+            "experience",
+            [],
+        )
+
+        if experience_records:
+            first_experience = experience_records[0]
+
+            experience_id = first_experience.get("id")
+
+            old_description = (
+                first_experience.get(
+                    "description",
+                    "",
+                )
+                or ""
+            )
+
+            changes.append(
+                AIChange(
+                    id=f"generate_experience_{experience_id}_001",
+                    action="update",
+                    section="experience",
+                    target_id=experience_id,
+                    old_content=old_description,
+                    new_content="\n".join(
+                        service_history
+                    ),
+                    reason=(
+                        "Generated service history based on "
+                        "the requested experience and career focus."
+                    ),
+                )
+            )
+
+        # ---------------------------------------------------------
+        # Project change
+        # ---------------------------------------------------------
+
+        project_description = "\n".join(
+            project.description
+        )
+
+        changes.append(
+            AIChange(
+                id="generate_project_001",
+                action="create",
+                section="project",
+                target_id=None,
+                old_content=None,
+                new_content=project_description,
+                data={
+                    "title": project.title,
+                    "role": "",
+                    "technologies": ", ".join(
+                        project.technologies
+                    ),
+                    "description": project_description,
+                },
+                reason=(
+                    "Generated a project based on the "
+                    "candidate's requested career direction."
+                ),
+            )
+        )
+
+        return SimpleNamespace(
+            summary=summary,
+            service_history=service_history,
+            project=project,
+            changes=changes,
         )
 
 
@@ -83,6 +197,7 @@ def test_generate_resume_content(client):
         assert "summary" in data
         assert "service_history" in data
         assert "project" in data
+        assert "changes" in data
 
         assert isinstance(data["summary"], str)
         assert data["summary"]
@@ -104,6 +219,11 @@ def test_generate_resume_content(client):
 
         assert isinstance(
             data["project"]["description"],
+            list,
+        )
+
+        assert isinstance(
+            data["changes"],
             list,
         )
 
@@ -135,7 +255,136 @@ def test_generate_resume_content(client):
         )
 
 
-def test_generate_resume_content_requires_authentication(client):
+def test_generate_resume_content_returns_ai_changes(
+    client,
+):
+    app.dependency_overrides[get_ai_service] = (
+        lambda: FakeResumeContentAIService()
+    )
+
+    try:
+        token = register_and_login(
+            client,
+            "resume-content-changes@example.com",
+        )
+
+        # Create a resume so the API can build
+        # generation_context.
+        resume = create_resume(
+            client,
+            token,
+            "AI Changes Resume",
+        )
+
+        assert resume["id"]
+
+        response = client.post(
+            "/api/v1/ai/generate-resume-content",
+            headers=auth_headers(token),
+            json={
+                "prompt": (
+                    "Create a machine learning resume with "
+                    "NLP and sentiment analysis experience."
+                ),
+            },
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        # ---------------------------------------------------------
+        # Basic response validation
+        # ---------------------------------------------------------
+
+        assert "summary" in data
+        assert "service_history" in data
+        assert "project" in data
+        assert "changes" in data
+
+        assert isinstance(
+            data["changes"],
+            list,
+        )
+
+        changes = data["changes"]
+
+        # ---------------------------------------------------------
+        # Verify that changes were generated
+        # ---------------------------------------------------------
+
+        assert len(changes) >= 1
+
+        # ---------------------------------------------------------
+        # Verify summary change
+        # ---------------------------------------------------------
+
+        summary_changes = [
+            change
+            for change in changes
+            if change["section"] == "summary"
+        ]
+
+        assert len(summary_changes) == 1
+
+        summary_change = summary_changes[0]
+
+        assert summary_change["action"] == "update"
+        assert summary_change["target_id"] is None
+        assert summary_change["new_content"]
+
+        assert (
+            summary_change["new_content"]
+            == data["summary"]
+        )
+
+        assert summary_change["reason"]
+
+        # ---------------------------------------------------------
+        # Verify project create change
+        # ---------------------------------------------------------
+
+        project_changes = [
+            change
+            for change in changes
+            if change["section"] == "project"
+        ]
+
+        assert len(project_changes) == 1
+
+        project_change = project_changes[0]
+
+        assert project_change["action"] == "create"
+        assert project_change["target_id"] is None
+        assert project_change["new_content"]
+
+        assert project_change["data"] is not None
+
+        assert (
+            project_change["data"]["title"]
+            == data["project"]["title"]
+        )
+
+        assert (
+            project_change["data"]["technologies"]
+        )
+
+        assert (
+            project_change["data"]["description"]
+        )
+
+        assert project_change["reason"]
+
+    finally:
+        app.dependency_overrides.pop(
+            get_ai_service,
+            None,
+        )
+
+
+def test_generate_resume_content_requires_authentication(
+    client,
+):
     response = client.post(
         "/api/v1/ai/generate-resume-content",
         json={
@@ -199,7 +448,11 @@ def test_generate_resume_content_whitespace_prompt(client):
 
 def test_generate_resume_content_ai_service_failure(client):
     class FailingResumeContentService:
-        def generate_resume_content(self, *args, **kwargs):
+        def generate_resume_content(
+            self,
+            *args,
+            **kwargs,
+        ):
             raise RuntimeError(
                 "AI service failure"
             )
@@ -237,7 +490,9 @@ def test_generate_resume_content_ai_service_failure(client):
         )
 
 
-def test_generate_resume_content_optional_dynamic_prompt(client):
+def test_generate_resume_content_optional_dynamic_prompt(
+    client,
+):
     app.dependency_overrides[get_ai_service] = (
         lambda: FakeResumeContentAIService()
     )
@@ -267,6 +522,8 @@ def test_generate_resume_content_optional_dynamic_prompt(client):
         assert data["summary"]
         assert data["service_history"]
         assert data["project"]["title"]
+        assert "changes" in data
+        assert isinstance(data["changes"], list)
 
     finally:
         app.dependency_overrides.pop(
