@@ -13,7 +13,6 @@ from app.ai.prompts import (
     PROJECT_IMPROVEMENT_PROMPT,
     RESUME_TEXT_IMPROVEMENT_PROMPT,
     SECTION_OPTIMIZATION_PROMPT,
-    SERVICE_HISTORY_GENERATION_PROMPT,
     STRUCTURED_RESUME_GENERATION_PROMPT,
     STRUCTURED_TAILORED_RESUME_PROMPT,
     SUMMARY_IMPROVEMENT_PROMPT,
@@ -31,7 +30,6 @@ from app.ai.schemas import (
     GeneratedResumeResponse,
     GeneratedTailoredContent,
     GenerateResumeContentResponse,
-    GenerateServiceHistoryResponse,
     ImproveExperienceResponse,
     ImproveProjectResponse,
     ImproveSummaryResponse,
@@ -1494,72 +1492,4 @@ class AIService:
             ) from exc
 
 
-    def generate_service_history(
-    self,
-    experience_id: int,
-    company: str,
-    job_title: str,
-    employment_type: str | None,
-    start_date: str | None,
-    end_date: str | None,
-    is_current: bool,
-    description: str | None,
-    professional_title: str | None,
-    summary: str | None,
-    skills: str,
-    projects: str,
-    education: str,
-    instruction: str | None,
-    ) -> GenerateServiceHistoryResponse:
-
-        prompt = SERVICE_HISTORY_GENERATION_PROMPT.format(
-            company=company,
-            job_title=job_title,
-            employment_type=employment_type or "",
-            start_date=start_date or "",
-            end_date=end_date or "",
-            is_current=str(is_current),
-            description=description or "",
-            professional_title=professional_title or "",
-            summary=summary or "",
-            skills=skills,
-            projects=projects,
-            education=education,
-            instruction=instruction or "",
-        )
-
-        raw_response = self.provider.generate(prompt)
-
-        try:
-            data = parse_json_response(raw_response)
-
-            service_history = data.get(
-                "service_history",
-                [],
-            )
-
-            if not isinstance(service_history, list):
-                raise ValueError(
-                    "service_history must be a list"
-                )
-
-            service_history = [
-                str(item).strip()
-                for item in service_history
-                if str(item).strip()
-            ]
-
-            if not service_history:
-                raise ValueError(
-                    "AI returned empty service history"
-                )
-
-            return GenerateServiceHistoryResponse(
-                experience_id=experience_id,
-                service_history=service_history,
-            )
-
-        except (ValueError, TypeError) as exc:
-            raise RuntimeError(
-                "AI returned invalid service history"
-            ) from exc
+    

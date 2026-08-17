@@ -224,18 +224,6 @@ class GeneratedTailoredContent(BaseModel):
     )
 
 
-class GenerateServiceHistoryRequest(BaseModel):
-    instruction: str | None = Field(
-        default=None,
-        max_length=1000,
-    )
-
-
-class GenerateServiceHistoryResponse(BaseModel):
-    experience_id: int
-    service_history: list[str] = Field(
-        min_length=1,
-    )
 
 
 class GenerateResumeContentRequest(BaseModel):
