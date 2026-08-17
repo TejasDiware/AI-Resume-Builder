@@ -3,6 +3,14 @@ from app.ai.prompts import (
     RESUME_TEXT_IMPROVEMENT_PROMPT,
 )
 
+from app.ai.prompts import (
+    SERVICE_HISTORY_GENERATION_PROMPT,
+)
+
+from app.ai.prompts import (
+    GENERATE_RESUME_CONTENT_PROMPT,
+)
+
 import json
 from app.quality.schemas import AIResumeQualityResponse
 
@@ -32,6 +40,9 @@ from app.ai.schemas import (
     GeneratedResumeContent,
     GeneratedTailoredContent,
     TailoredResumeResponse,
+    GenerateServiceHistoryResponse,
+    GenerateResumeContentResponse,
+    GeneratedResumeProject,
 )
 
 from app.ai.prompts import (
@@ -220,6 +231,118 @@ class AIService:
             original_summary=summary,
             improved_summary=improved_summary,
         )
+
+    def generate_resume_content(
+        self,
+        prompt_input: str,
+    ) -> GenerateResumeContentResponse:
+
+        prompt = GENERATE_RESUME_CONTENT_PROMPT.format(
+            prompt=prompt_input,
+        )
+
+        raw_response = self.provider.generate(prompt)
+
+        try:
+            data = parse_json_response(raw_response)
+
+            project_data = data.get("project", {})
+
+            if not isinstance(project_data, dict):
+                raise ValueError(
+                    "project must be an object"
+                )
+
+            technologies = project_data.get(
+                "technologies",
+                [],
+            )
+
+            description = project_data.get(
+                "description",
+                [],
+            )
+
+            service_history = data.get(
+                "service_history",
+                [],
+            )
+
+            if not isinstance(technologies, list):
+                raise ValueError(
+                    "project technologies must be a list"
+                )
+
+            if not isinstance(description, list):
+                raise ValueError(
+                    "project description must be a list"
+                )
+
+            if not isinstance(service_history, list):
+                raise ValueError(
+                    "service_history must be a list"
+                )
+
+            summary = str(
+                data.get("summary", "")
+            ).strip()
+
+            service_history = [
+                str(item).strip()
+                for item in service_history
+                if str(item).strip()
+            ]
+
+            technologies = [
+                str(item).strip()
+                for item in technologies
+                if str(item).strip()
+            ]
+
+            description = [
+                str(item).strip()
+                for item in description
+                if str(item).strip()
+            ]
+
+            if not summary:
+                raise ValueError(
+                    "AI returned empty summary"
+                )
+
+            if not service_history:
+                raise ValueError(
+                    "AI returned empty service history"
+                )
+
+            if not project_data.get("title"):
+                raise ValueError(
+                    "AI returned empty project title"
+                )
+
+            if not description:
+                raise ValueError(
+                    "AI returned empty project description"
+                )
+
+            project = GeneratedResumeProject(
+                title=str(
+                    project_data["title"]
+                ).strip(),
+                technologies=technologies,
+                description=description,
+            )
+
+            return GenerateResumeContentResponse(
+                summary=summary,
+                service_history=service_history,
+                project=project,
+            )
+
+        except (ValueError, TypeError, KeyError) as exc:
+            raise RuntimeError(
+                "AI returned invalid resume content"
+            ) from exc
 
 
 
@@ -684,4 +807,75 @@ class AIService:
         except (ValueError, KeyError) as exc:
             raise RuntimeError(
                 "AI returned invalid resume quality recommendations"
+            ) from exc
+
+
+    def generate_service_history(
+    self,
+    experience_id: int,
+    company: str,
+    job_title: str,
+    employment_type: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    is_current: bool,
+    description: str | None,
+    professional_title: str | None,
+    summary: str | None,
+    skills: str,
+    projects: str,
+    education: str,
+    instruction: str | None,
+    ) -> GenerateServiceHistoryResponse:
+
+        prompt = SERVICE_HISTORY_GENERATION_PROMPT.format(
+            company=company,
+            job_title=job_title,
+            employment_type=employment_type or "",
+            start_date=start_date or "",
+            end_date=end_date or "",
+            is_current=str(is_current),
+            description=description or "",
+            professional_title=professional_title or "",
+            summary=summary or "",
+            skills=skills,
+            projects=projects,
+            education=education,
+            instruction=instruction or "",
+        )
+
+        raw_response = self.provider.generate(prompt)
+
+        try:
+            data = parse_json_response(raw_response)
+
+            service_history = data.get(
+                "service_history",
+                [],
+            )
+
+            if not isinstance(service_history, list):
+                raise ValueError(
+                    "service_history must be a list"
+                )
+
+            service_history = [
+                str(item).strip()
+                for item in service_history
+                if str(item).strip()
+            ]
+
+            if not service_history:
+                raise ValueError(
+                    "AI returned empty service history"
+                )
+
+            return GenerateServiceHistoryResponse(
+                experience_id=experience_id,
+                service_history=service_history,
+            )
+
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(
+                "AI returned invalid service history"
             ) from exc

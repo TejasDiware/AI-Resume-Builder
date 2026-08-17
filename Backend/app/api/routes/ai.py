@@ -18,6 +18,10 @@ from app.ai.schemas import (
     ApplyTailoredResumeRequest,
     GenerateAndSaveResumeResponse,
     GenerateAndSaveTailoredResumeResponse,
+    GenerateResumeContentRequest,
+    GenerateResumeContentResponse,
+    GenerateServiceHistoryRequest,
+    GenerateServiceHistoryResponse,
     GenerateResumeRequest,
     GeneratedResumeResponse,
     ImproveExperienceRequest,
@@ -179,7 +183,131 @@ def improve_experience(
             detail="AI service is temporarily unavailable",
         )
 
+@router.post(
+    "/generate-service-history/{resume_id}/{experience_id}",
+    response_model=GenerateServiceHistoryResponse,
+)
+def generate_service_history(
+    resume_id: int,
+    experience_id: int,
+    request: GenerateServiceHistoryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    experience = db.scalar(
+        select(Experience)
+        .join(
+            Resume,
+            Experience.resume_id == Resume.id,
+        )
+        .where(
+            Experience.id == experience_id,
+            Experience.resume_id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
 
+    if experience is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Experience not found",
+        )
+
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
+
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    profile = db.scalar(
+        select(CandidateProfile).where(
+            CandidateProfile.user_id == current_user.id,
+        )
+    )
+
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate profile not found",
+        )
+
+    try:
+        context = build_resume_ai_context(
+            resume=resume,
+            current_user=current_user,
+            db=db,
+        )
+
+        return ai_service.generate_service_history(
+            experience_id=experience.id,
+            company=experience.company,
+            job_title=experience.job_title,
+            employment_type=experience.employment_type,
+            start_date=(
+                experience.start_date.isoformat()
+                if experience.start_date
+                else None
+            ),
+            end_date=(
+                experience.end_date.isoformat()
+                if experience.end_date
+                else None
+            ),
+            is_current=experience.is_current,
+            description=experience.description,
+            professional_title=profile.professional_title,
+            summary=profile.summary,
+            skills=context["skills"],
+            projects=context["projects"],
+            education=context["education"],
+            instruction=request.instruction,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is temporarily unavailable",
+        )
+
+@router.post(
+    "/generate-resume-content",
+    response_model=GenerateResumeContentResponse,
+)
+def generate_resume_content(
+    request: GenerateResumeContentRequest,
+    current_user: User = Depends(get_current_user),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    try:
+        return ai_service.generate_resume_content(
+            prompt_input=request.prompt,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is temporarily unavailable",
+        )
 
 @router.post(
     "/improve-summary",

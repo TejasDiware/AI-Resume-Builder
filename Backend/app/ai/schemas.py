@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field, field_validator
+
 
 class ApplyAIChangeRequest(BaseModel):
     section: Literal[
@@ -173,3 +175,50 @@ class GeneratedTailoredContent(BaseModel):
     projects: list[GeneratedTailoredProject] = Field(
         default_factory=list
     )
+
+class GenerateServiceHistoryRequest(BaseModel):
+    instruction: str | None = Field(
+        default=None,
+        max_length=1000,
+    )
+
+
+class GenerateServiceHistoryResponse(BaseModel):
+    experience_id: int
+    service_history: list[str] = Field(
+        min_length=1,
+    )
+
+class GenerateResumeContentRequest(BaseModel):
+    prompt: str = Field(
+        min_length=1,
+        max_length=5000,
+    )
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Prompt cannot be empty")
+
+        return value
+
+
+class GeneratedResumeProject(BaseModel):
+    title: str
+    technologies: list[str] = Field(
+        default_factory=list,
+    )
+    description: list[str] = Field(
+        default_factory=list,
+    )
+
+
+class GenerateResumeContentResponse(BaseModel):
+    summary: str
+    service_history: list[str] = Field(
+        default_factory=list,
+    )
+    project: GeneratedResumeProject
