@@ -34,7 +34,9 @@ from app.ai.schemas import (
     ImproveProjectResponse,
     ImproveSummaryResponse,
     ImproveTextResponse,
-    TailoredResumeResponse,
+    TailoredResumeContent,
+   
+
 )
 
 from app.ats.schemas import (
@@ -918,7 +920,7 @@ class AIService:
             else {}
         )
 
-        prompt = OPTIMIZE_SECTION_PROMPT.format(
+        prompt = SECTION_OPTIMIZATION_PROMPT.format(
             section=section,
             original_content=original_content,
             job_description=job_description,

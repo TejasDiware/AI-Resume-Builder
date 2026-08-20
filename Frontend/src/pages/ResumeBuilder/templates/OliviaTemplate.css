@@ -1,0 +1,269 @@
+/* ── A4 Resume — Olivia Template ───────────────────────────────────────────── */
+
+.olivia-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: #f3f4f6;
+  padding: 32px 16px;
+  min-height: 100vh;
+}
+
+/* A4 paper */
+.olivia-page {
+  width: 794px;
+  min-height: 1123px;
+  background: #fdf6f6;
+  display: flex;
+  flex-direction: row;
+  font-family: 'Georgia', serif;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── LEFT COLUMN ── */
+.olivia-left {
+  width: 260px;
+  min-width: 260px;
+  background: #f5e8e4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 0 32px;
+}
+
+/* Photo */
+.olivia-photo-frame {
+  width: 210px;
+  height: 230px;
+  border: 6px solid #fff;
+  overflow: hidden;
+  margin-bottom: 28px;
+  flex-shrink: 0;
+  background: #e8d5cf;
+}
+
+.olivia-photo-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+/* Section label boxes */
+.olivia-section-label {
+  width: 100%;
+  background: #fff;
+  text-align: center;
+  padding: 7px 10px;
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #3a2e2a;
+  margin-bottom: 14px;
+}
+
+/* Left section block */
+.olivia-left-section {
+  width: 100%;
+  padding: 0 22px 22px;
+}
+
+/* About text */
+.olivia-about-text {
+  font-size: 9.5px;
+  color: #5a4a44;
+  line-height: 1.75;
+  font-family: 'Arial', sans-serif;
+}
+
+/* Contact items */
+.olivia-contact-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 9.5px;
+  color: #5a4a44;
+  font-family: 'Arial', sans-serif;
+  line-height: 1.5;
+}
+
+.olivia-contact-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #b07a6a;
+}
+
+/* Skill / Language list */
+.olivia-list-item {
+  font-size: 9.5px;
+  color: #5a4a44;
+  font-family: 'Arial', sans-serif;
+  margin-bottom: 5px;
+  padding-left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+}
+
+.olivia-list-item::before {
+  content: '•';
+  color: #b07a6a;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* ── RIGHT COLUMN ── */
+.olivia-right {
+  flex: 1;
+  padding: 40px 36px 32px 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Name block */
+.olivia-name-script {
+  font-family: 'Georgia', serif;
+  font-size: 52px;
+  font-style: italic;
+  color: #2a1f1a;
+  line-height: 1;
+  margin: 0;
+  font-weight: 400;
+  letter-spacing: -1px;
+}
+
+.olivia-name-last {
+  font-family: 'Arial', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  color: #2a1f1a;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin: 0 0 8px;
+  line-height: 1.1;
+}
+
+.olivia-divider-rose {
+  width: 100%;
+  height: 1.5px;
+  background: #c9a49a;
+  margin: 10px 0;
+}
+
+.olivia-profession {
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #6b5550;
+  margin: 8px 0 24px;
+}
+
+/* Right section heading */
+.olivia-right-section-heading {
+  background: #f0ddd9;
+  padding: 7px 14px;
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: #3a2e2a;
+  margin-bottom: 18px;
+}
+
+/* Experience entry */
+.olivia-exp-entry {
+  margin-bottom: 20px;
+}
+
+.olivia-exp-role {
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2a1f1a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 2px;
+}
+
+.olivia-exp-company {
+  font-family: 'Arial', sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #3a2e2a;
+  margin: 0 0 2px;
+}
+
+.olivia-exp-period {
+  font-family: 'Arial', sans-serif;
+  font-size: 9.5px;
+  color: #8a7470;
+  margin: 0 0 6px;
+}
+
+.olivia-exp-desc {
+  font-family: 'Arial', sans-serif;
+  font-size: 9.5px;
+  color: #5a4a44;
+  line-height: 1.75;
+  margin: 0;
+}
+
+/* Education entry */
+.olivia-edu-entry {
+  margin-bottom: 16px;
+}
+
+.olivia-edu-degree {
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2a1f1a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 2px;
+}
+
+.olivia-edu-school {
+  font-family: 'Arial', sans-serif;
+  font-size: 10px;
+  color: #5a4a44;
+  margin: 0 0 1px;
+}
+
+.olivia-edu-period {
+  font-family: 'Arial', sans-serif;
+  font-size: 9.5px;
+  color: #8a7470;
+  margin: 0;
+}
+
+/* ── Print / PDF ── */
+@media print {
+  .olivia-wrapper {
+    background: #fff;
+    padding: 0;
+  }
+  .olivia-page {
+    width: 794px;
+    min-height: 1123px;
+    box-shadow: none;
+    margin: 0;
+  }
+}
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
