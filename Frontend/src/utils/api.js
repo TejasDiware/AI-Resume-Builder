@@ -14,13 +14,18 @@ api.interceptors.request.use((config) => {
 
 /* ── Handle 401 globally ── */
 api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
+  (response) => response,
+
+  (error) => {
+    if (error.response?.status === 401) {
       localStorage.removeItem('rb_token')
       localStorage.removeItem('rb_user')
+
+      // Tell AuthContext that the session is no longer valid.
+      window.dispatchEvent(new Event('rb:unauthorized'))
     }
-    return Promise.reject(err)
+
+    return Promise.reject(error)
   },
 )
 

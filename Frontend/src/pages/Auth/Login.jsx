@@ -37,27 +37,76 @@ export default function Login() {
   /* ── Submit → POST /api/auth/login ── */
   const handleSubmit = async (ev) => {
     ev.preventDefault()
-    const e = validate()
-    if (Object.keys(e).length) { setErrors(e); return }
+
+    const validationErrors = validate()
+
+    if (Object.keys(validationErrors).length) {
+      setErrors(validationErrors)
+      return
+    }
 
     setLoading(true)
     setApiError('')
 
     try {
-      // Backend TokenResponse only contains { access_token, token_type } — no user object.
-      const { data } = await authApi.login(form.email, form.password)
-      // Store the token immediately so the /me request is authenticated.
-      localStorage.setItem('rb_token', data.access_token)
-      // Fetch the authenticated user profile.
+      /* ========================================================
+        Step 1: Login and receive JWT
+      ======================================================== */
+
+      const { data } = await authApi.login(
+        form.email.trim(),
+        form.password
+      )
+
+      const accessToken = data.access_token
+
+      if (!accessToken) {
+        throw new Error('Login response did not contain an access token.')
+      }
+
+      /*
+      * Temporarily store the token so that authApi.me()
+      * can send Authorization: Bearer <token>.
+      *
+      * AuthContext.login() will persist the final session.
+      */
+      localStorage.setItem('rb_token', accessToken)
+
+      /* ========================================================
+        Step 2: Fetch authenticated user
+      ======================================================== */
+
       const { data: userData } = await authApi.me()
-      login(data.access_token, userData)
+
+      /* ========================================================
+        Step 3: Store complete authenticated session
+      ======================================================== */
+
+      login(accessToken, userData)
+
+      /* ========================================================
+        Step 4: Redirect
+      ======================================================== */
+
       navigate(from, { replace: true })
+
     } catch (err) {
+      /* Never leave a broken token behind */
+      localStorage.removeItem('rb_token')
+      localStorage.removeItem('rb_user')
+
       const msg =
         err.response?.data?.detail ||
         err.response?.data?.message ||
+        err.message ||
         'Login failed. Please check your credentials and try again.'
-      setApiError(typeof msg === 'string' ? msg : JSON.stringify(msg))
+
+      setApiError(
+        typeof msg === 'string'
+          ? msg
+          : JSON.stringify(msg)
+      )
+
     } finally {
       setLoading(false)
     }

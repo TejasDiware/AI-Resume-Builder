@@ -9,7 +9,11 @@ export default function Signup() {
   const navigate  = useNavigate()
   const { login } = useAuth()
 
-  const [form,     setForm]     = useState({ name: '', email: '', password: '', confirm: '' })
+  const [form, setForm] = useState({
+    email: '',
+    password: '',
+    confirm: ''
+  })
   const [errors,   setErrors]   = useState({})
   const [apiError, setApiError] = useState('')
   const [showPass,    setShowPass]    = useState(false)
@@ -19,7 +23,7 @@ export default function Signup() {
   /* ── Client-side validation ── */
   const validate = () => {
     const e = {}
-    if (!form.name.trim())                          e.name     = 'Full name is required.'
+    
     if (!form.email.trim())                         e.email    = 'Email is required.'
     else if (!/\S+@\S+\.\S+/.test(form.email))      e.email    = 'Enter a valid email address.'
     if (!form.password)                             e.password = 'Password is required.'
@@ -38,30 +42,86 @@ export default function Signup() {
   /* ── Submit → POST /api/auth/register, then POST /api/auth/login ── */
   const handleSubmit = async (ev) => {
     ev.preventDefault()
-    const e = validate()
-    if (Object.keys(e).length) { setErrors(e); return }
+
+    const validationErrors = validate()
+
+    if (Object.keys(validationErrors).length) {
+      setErrors(validationErrors)
+      return
+    }
 
     setLoading(true)
     setApiError('')
 
     try {
-      // Step 1: register — returns UserResponse (no token)
-      await authApi.signup(form.email, form.password)
+      /* ========================================================
+        Step 1: Register account
+      ======================================================== */
 
-      // Step 2: login to obtain access token
-      const { data } = await authApi.login(form.email, form.password)
-      // Store token first so the /me request is authenticated
-      localStorage.setItem('rb_token', data.access_token)
-      // TokenResponse has no user — fetch profile via /me
+      await authApi.signup(
+        form.email.trim(),
+        form.password
+      )
+
+      /* ========================================================
+        Step 2: Login immediately after registration
+      ======================================================== */
+
+      const { data } = await authApi.login(
+        form.email.trim(),
+        form.password
+      )
+
+      const accessToken = data.access_token
+
+      if (!accessToken) {
+        throw new Error(
+          'Registration succeeded, but login did not return a token.'
+        )
+      }
+
+      /*
+      * Temporarily store token so /me can authenticate.
+      */
+      localStorage.setItem('rb_token', accessToken)
+
+      /* ========================================================
+        Step 3: Fetch authenticated user
+      ======================================================== */
+
       const { data: userData } = await authApi.me()
-      login(data.access_token, userData)
-      navigate('/app/dashboard', { replace: true })
+
+      /* ========================================================
+        Step 4: Persist complete session
+      ======================================================== */
+
+      login(accessToken, userData)
+
+      /* ========================================================
+        Step 5: Go to dashboard
+      ======================================================== */
+
+      navigate('/app/dashboard', {
+        replace: true,
+      })
+
     } catch (err) {
+      /* Clean up any partially-created session */
+      localStorage.removeItem('rb_token')
+      localStorage.removeItem('rb_user')
+
       const msg =
         err.response?.data?.detail ||
         err.response?.data?.message ||
+        err.message ||
         'Signup failed. This email may already be registered.'
-      setApiError(typeof msg === 'string' ? msg : JSON.stringify(msg))
+
+      setApiError(
+        typeof msg === 'string'
+          ? msg
+          : JSON.stringify(msg)
+      )
+
     } finally {
       setLoading(false)
     }
@@ -99,22 +159,7 @@ export default function Signup() {
           )}
 
           <form onSubmit={handleSubmit} noValidate>
-            {/* Full name */}
-            <div className="auth-field">
-              <label className="auth-field__label">Full Name</label>
-              <div className={`auth-field__wrap ${errors.name ? 'has-error' : ''}`}>
-                <MdPerson size={18} className="auth-field__icon" />
-                <input
-                  type="text"
-                  className="auth-field__input"
-                  placeholder="John Doe"
-                  value={form.name}
-                  onChange={handleChange('name')}
-                  autoComplete="name"
-                />
-              </div>
-              {errors.name && <p className="auth-field__error">{errors.name}</p>}
-            </div>
+           
 
             {/* Email */}
             <div className="auth-field">

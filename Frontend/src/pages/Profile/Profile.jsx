@@ -38,8 +38,18 @@ export default function Profile() {
   const templateId = rawTemplate || '1'
 
   const ctx = useResume()
-  const { profileData, setProfileData, setProfileSaved,
-          saveProfileToBackend, ensureResumeExists, resumeTitle, websites } = ctx
+
+  const {
+    profileData,
+    setProfileData,
+    setProfileSaved,
+    saveProfileToBackend,
+    ensureResumeExists,
+    resumeTitle,
+    websites,
+    activeTemplateId,
+    switchTemplate,
+  } = ctx
 
   // Guard: only redirect if coming from resume-builder flow (template param present)
   // AND somehow the template value is empty. Direct navigation (/app/profile) is
@@ -50,6 +60,29 @@ export default function Profile() {
       navigate('/app/templates')
     }
   }, [rawTemplate, navigate])
+
+  /*
+  * Keep ResumeContext synchronized with the template selected
+  * in the current resume-builder URL.
+  *
+  * This is necessary because ResumeProvider can remain mounted
+  * while React Router changes the page.
+  */
+  useEffect(() => {
+    const id = Number(templateId)
+
+    if (
+      Number.isInteger(id) &&
+      id > 0 &&
+      id !== Number(activeTemplateId)
+    ) {
+      switchTemplate(id)
+    }
+  }, [
+    templateId,
+    activeTemplateId,
+    switchTemplate,
+  ])
 
   // Show banner when redirected here because profile was incomplete
   const wasBlocked = params.get('incomplete') === '1'
@@ -132,47 +165,189 @@ export default function Profile() {
 
   const handleSave = async () => {
     const missing = []
-    if (!(form.firstName && form.firstName.trim())) missing.push('First Name')
-    if (!(form.lastName && form.lastName.trim())) missing.push('Last Name')
-    if (!(form.profession && form.profession.trim())) missing.push('Profession')
-    if (!(form.dob && form.dob.trim())) missing.push('Date of Birth')
-    if (!(form.city && form.city.trim())) missing.push('City')
-    if (!(form.state && form.state.trim())) missing.push('State')
-    const hasContact = (form.email && form.email.trim()) || (form.phone && form.phone.trim())
-    if (!hasContact) missing.push('Email or Phone')
+
+    if (
+      !(form.firstName && form.firstName.trim())
+    ) {
+      missing.push('First Name')
+    }
+
+    if (
+      !(form.lastName && form.lastName.trim())
+    ) {
+      missing.push('Last Name')
+    }
+
+    if (
+      !(form.profession && form.profession.trim())
+    ) {
+      missing.push('Profession')
+    }
+
+    if (
+      !(form.dob && form.dob.trim())
+    ) {
+      missing.push('Date of Birth')
+    }
+
+    if (
+      !(form.city && form.city.trim())
+    ) {
+      missing.push('City')
+    }
+
+    if (
+      !(form.state && form.state.trim())
+    ) {
+      missing.push('State')
+    }
+
+    const hasContact =
+      (form.email && form.email.trim()) ||
+      (form.phone && form.phone.trim())
+
+    if (!hasContact) {
+      missing.push('Email or Phone')
+    }
 
     if (missing.length) {
-      setError('Please fill required fields: ' + missing.join(', '))
+      setError(
+        'Please fill required fields: ' +
+        missing.join(', ')
+      )
+
       return
     }
 
     setError('')
-    setProfileData({ ...form })
+    setSaved(false)
+
+    /*
+    * -------------------------------------------------------
+    * STEP 1
+    * Make absolutely sure the selected template is active.
+    * -------------------------------------------------------
+    */
+
+    const selectedTemplateId =
+      Number(templateId)
+
+    if (
+      !Number.isInteger(selectedTemplateId) ||
+      selectedTemplateId <= 0
+    ) {
+      setError(
+        'Invalid resume template selected.'
+      )
+
+      return
+    }
+
+    switchTemplate(
+      selectedTemplateId
+    )
+
+    /*
+    * -------------------------------------------------------
+    * STEP 2
+    * Create the backend Resume first.
+    *
+    * This guarantees that every later section has a
+    * valid currentResumeId.
+    * -------------------------------------------------------
+    */
+
+    let resumeId = null
+
+    try {
+      resumeId =
+        await ensureResumeExists(
+          resumeTitle ||
+          `${form.firstName} ${form.lastName}`.trim() ||
+          'Untitled Resume',
+          selectedTemplateId
+        )
+    } catch (err) {
+      console.error(
+        'Resume creation failed:',
+        err
+      )
+    }
+
+    if (!resumeId) {
+      setError(
+        'Unable to create your resume. Please try again.'
+      )
+
+      return
+    }
+
+    /*
+    * -------------------------------------------------------
+    * STEP 3
+    * Save the candidate/profile information.
+    * -------------------------------------------------------
+    */
+
+    let profileSavedSuccessfully = false
+
+    try {
+      profileSavedSuccessfully =
+        await saveProfileToBackend({
+          ...form,
+
+          linkedin:
+            websites?.linkedin || '',
+
+          github:
+            websites?.github || '',
+
+          portfolio:
+            websites?.portfolio || '',
+        })
+    } catch (err) {
+      console.error(
+        'Backend save failed (profile):',
+        err
+      )
+    }
+
+    if (!profileSavedSuccessfully) {
+      setError(
+        'Resume was created, but your profile could not be saved. Please try again.'
+      )
+
+      return
+    }
+
+    /*
+    * -------------------------------------------------------
+    * STEP 4
+    * Update frontend state only after backend success.
+    * -------------------------------------------------------
+    */
+
+    setProfileData({
+      ...form,
+    })
+
     setProfileSaved(true)
 
-    // Persist to backend — merge current websites context so linkedin/github/portfolio are included
-    try {
-      await saveProfileToBackend({
-        ...form,
-        linkedin:  websites?.linkedin  || '',
-        github:    websites?.github    || '',
-        portfolio: websites?.portfolio || '',
-      })
-    } catch (err) {
-      console.error('Backend save failed (profile):', err)
-    }
-
-    // Ensure a resume row exists so later sections can attach data to it
-    try {
-      await ensureResumeExists(resumeTitle || `${form.firstName} ${form.lastName}`.trim() || 'Untitled Resume')
-    } catch (err) {
-      console.error('ensureResumeExists failed:', err)
-    }
+    /*
+    * -------------------------------------------------------
+    * STEP 5
+    * Move to Experience while preserving the template.
+    * -------------------------------------------------------
+    */
 
     setSaved(true)
+
     setTimeout(() => {
       setSaved(false)
-      navigate(`/app/resume-builder/experience?template=${templateId}`)
+
+      navigate(
+        `/app/resume-builder/experience?template=${selectedTemplateId}`
+      )
     }, 700)
   }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import templateMap from '../ResumeBuilder/templates/templateMap'
 import { useResume, ResumeContext } from '../../context/ResumeContext'
+import { resumeApi } from '../../utils/api'
 
 const A4_W = 794
 const A4_H = 1123
@@ -42,7 +43,7 @@ function TemplatePreview({ Component }) {
         background: '#f8fafc',
       }}
     >
-      {/* Each template preview uses its own demo data */}
+      {/* Template cards use their own demo data. */}
       <ResumeContext.Provider value={null}>
         <div
           style={{
@@ -68,16 +69,7 @@ export default function Templates() {
   const context = useResume()
 
   const params = new URLSearchParams(location.search)
-
-  const title = params.get('title')
-  const fromSummary = params.get('template') !== null
-
-  /*
-   * FIX:
-   * When Templates page opens, first check the URL template ID.
-   * If URL doesn't have one, use the current activeTemplateId.
-   * Finally fall back to template 1.
-   */
+  const titleFromUrl = params.get('title')
   const urlTemplateId = Number(params.get('template'))
 
   const [selected, setSelected] = useState(() => {
@@ -90,33 +82,14 @@ export default function Templates() {
 
   const [activeCategory, setActiveCategory] = useState('All Templates')
   const [search, setSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  /*
-   * Keep selected template synchronized when the URL changes.
-   */
   useEffect(() => {
     if (urlTemplateId) {
       setSelected(urlTemplateId)
     }
   }, [urlTemplateId])
-
-  /*
-   * Make sure the user has a resume before accessing templates.
-   */
-  useEffect(() => {
-    const hasResume =
-      (context?.savedResumes?.length ?? 0) > 0 ||
-      Boolean(context?.resumeTitle)
-
-    if (!hasResume && !fromSummary) {
-      navigate('/app/resume', { replace: true })
-    }
-  }, [
-    context?.resumeTitle,
-    context?.savedResumes?.length,
-    fromSummary,
-    navigate,
-  ])
 
   const templates = Object.entries(templateMap).map(
     ([id, template]) => ({
@@ -138,49 +111,109 @@ export default function Templates() {
   })
 
   /*
-   * FIX:
-   * Selecting a template now updates:
+   * Select template.
    *
-   * 1. ResumeContext activeTemplateId
-   * 2. saved resume templateId
-   * 3. URL template parameter
+   * This intentionally talks to the backend directly instead of relying
+   * only on ResumeContext. This guarantees that the selected template is
+   * persisted against a real PostgreSQL resume before moving to Profile.
    */
-  const handleSelect = () => {
-    if (!selected) return
+  const handleSelect = async () => {
+    if (saving) return
 
     const templateId = Number(selected)
 
-    if (!templateId) return
-
-    
-    context?.switchTemplate?.(templateId)
-
-  
-    if (title) {
-      context?.setSavedResumes?.((resumes) => {
-        const createdResume = [...resumes]
-          .reverse()
-          .find((resume) => resume.title === title)
-
-        if (!createdResume) {
-          return resumes
-        }
-
-        return resumes.map((resume) =>
-          resume.id === createdResume.id
-            ? {
-                ...resume,
-                templateId: templateId,
-              }
-            : resume,
-        )
-      })
+    if (!Number.isInteger(templateId) || templateId <= 0) {
+      setError('Please select a valid template.')
+      return
     }
 
-    /*
-     * Pass the new template ID to the next page.
-     */
-    navigate(`/app/profile?template=${templateId}`)
+    setSaving(true)
+    setError('')
+
+    try {
+      let resumeId = context?.currentResumeId || null
+
+      /*
+       * If a resume title was supplied, use that exact backend resume.
+       */
+      if (titleFromUrl && Array.isArray(context?.savedResumes)) {
+        const matchingResume = [...context.savedResumes]
+          .reverse()
+          .find(
+            (resume) =>
+              String(resume?.title || '').trim() ===
+              String(titleFromUrl).trim(),
+          )
+
+        if (matchingResume?.id) {
+          resumeId = matchingResume.id
+        }
+      }
+
+      /*
+       * If there is no backend resume yet, create one.
+       */
+      if (!resumeId) {
+        const { data } = await resumeApi.create({
+          title:
+            titleFromUrl ||
+            context?.resumeTitle ||
+            'Untitled Resume',
+          template: 'classic',
+        })
+
+        resumeId = data?.id
+
+        if (!resumeId) {
+          throw new Error(
+            'Backend created the resume but did not return a resume ID.',
+          )
+        }
+
+        context?.setCurrentResumeId?.(resumeId)
+      }
+
+      /*
+       * Persist the actual frontend template ID.
+       *
+       * IMPORTANT:
+       * template_id is the database template identifier added to resumes.
+       */
+      await resumeApi.update(resumeId, {
+        template_id: templateId,
+      })
+
+      /*
+       * Synchronize frontend state.
+       */
+      context?.setCurrentResumeId?.(resumeId)
+      context?.switchTemplate?.(templateId)
+      await context?.refreshResumes?.()
+
+      /*
+       * Profile is intentionally outside ProfileGuard, so the user can
+       * continue filling the resume even when it is still empty.
+       */
+      navigate(`/app/profile?template=${templateId}`, {
+        replace: true,
+      })
+    } catch (err) {
+      console.error('Template selection failed:', err)
+
+      const detail =
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Unable to save the selected template.'
+
+      setError(
+        typeof detail === 'string'
+          ? detail
+          : JSON.stringify(detail),
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -202,7 +235,6 @@ export default function Templates() {
           overflow: 'hidden',
         }}
       >
-        {/* Header */}
         <header
           style={{
             padding: '28px 32px 18px',
@@ -231,9 +263,27 @@ export default function Templates() {
             Select a template and customize it to match
             your style
           </p>
+
+          {error && (
+            <div
+              role="alert"
+              style={{
+                maxWidth: 720,
+                margin: '0 auto',
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#b91c1c',
+                fontSize: '0.82rem',
+                textAlign: 'left',
+              }}
+            >
+              {error}
+            </div>
+          )}
         </header>
 
-        {/* Categories */}
         <div
           style={{
             display: 'flex',
@@ -245,10 +295,9 @@ export default function Templates() {
         >
           {categories.map((category) => (
             <button
+              type="button"
               key={category}
-              onClick={() =>
-                setActiveCategory(category)
-              }
+              onClick={() => setActiveCategory(category)}
               style={{
                 border:
                   activeCategory === category
@@ -267,7 +316,6 @@ export default function Templates() {
                     ? '#fff'
                     : '#4b5563',
                 cursor: 'pointer',
-                transition: 'all 0.2s',
               }}
             >
               {category}
@@ -275,7 +323,6 @@ export default function Templates() {
           ))}
         </div>
 
-        {/* Search */}
         <div
           style={{
             padding: '16px 32px',
@@ -301,7 +348,6 @@ export default function Templates() {
           />
         </div>
 
-        {/* Template grid */}
         <div
           style={{
             padding: '0 32px 32px',
@@ -319,12 +365,15 @@ export default function Templates() {
               <article
                 key={template.id}
                 onClick={() =>
+                  !saving &&
                   setSelected(template.id)
                 }
                 style={{
                   borderRadius: 12,
                   overflow: 'hidden',
-                  cursor: 'pointer',
+                  cursor: saving
+                    ? 'default'
+                    : 'pointer',
                   border: isSelected
                     ? '2.5px solid #4f46e5'
                     : '1px solid #dbe1ea',
@@ -376,12 +425,14 @@ export default function Templates() {
                   )}
                 </div>
 
-                {/* Select Template button */}
                 {isSelected && (
                   <button
+                    type="button"
+                    disabled={saving}
                     onClick={(event) => {
+                      event.preventDefault()
                       event.stopPropagation()
-                      handleSelect()
+                      void handleSelect()
                     }}
                     style={{
                       width:
@@ -390,24 +441,21 @@ export default function Templates() {
                       border: 'none',
                       borderRadius: 8,
                       padding: '10px',
-                      background: '#4f46e5',
+                      background: saving
+                        ? '#818cf8'
+                        : '#4f46e5',
                       color: '#fff',
                       fontSize: '0.8rem',
                       fontWeight: 700,
-                      cursor: 'pointer',
-                      transition:
-                        'all 0.2s',
+                      cursor: saving
+                        ? 'not-allowed'
+                        : 'pointer',
+                      transition: 'all 0.2s',
                     }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.background =
-                        '#4338ca')
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.background =
-                        '#4f46e5')
-                    }
                   >
-                    Select Template
+                    {saving
+                      ? 'Saving...'
+                      : 'Select Template'}
                   </button>
                 )}
               </article>

@@ -35,6 +35,7 @@ from app.ai.schemas import (
     ImproveSummaryResponse,
     ImproveTextResponse,
     TailoredResumeContent,
+    TailoredResumeResponse,
    
 
 )

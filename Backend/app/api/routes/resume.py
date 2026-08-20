@@ -19,6 +19,10 @@ router = APIRouter(
 )
 
 
+# ==========================================================
+# CREATE RESUME
+# ==========================================================
+
 @router.post(
     "",
     response_model=ResumeResponse,
@@ -31,7 +35,9 @@ def create_resume(
 ):
     resume = Resume(
         user_id=current_user.id,
-        **resume_data.model_dump(),
+        title=resume_data.title,
+        template_id=resume_data.template_id,
+        template=resume_data.template,
     )
 
     db.add(resume)
@@ -40,6 +46,10 @@ def create_resume(
 
     return resume
 
+
+# ==========================================================
+# GET CURRENT USER'S RESUMES
+# ==========================================================
 
 @router.get(
     "",
@@ -51,7 +61,9 @@ def get_resumes(
 ):
     resumes = db.scalars(
         select(Resume)
-        .where(Resume.user_id == current_user.id)
+        .where(
+            Resume.user_id == current_user.id
+        )
         .order_by(
             Resume.created_at.desc(),
             Resume.id.desc(),
@@ -61,6 +73,9 @@ def get_resumes(
     return resumes
 
 
+# ==========================================================
+# GET SINGLE RESUME
+# ==========================================================
 
 @router.get(
     "/{resume_id}",
@@ -87,7 +102,9 @@ def get_resume(
     return resume
 
 
-
+# ==========================================================
+# UPDATE RESUME
+# ==========================================================
 
 @router.put(
     "/{resume_id}",
@@ -112,7 +129,9 @@ def update_resume(
             detail="Resume not found",
         )
 
-    update_data = resume_data.model_dump(exclude_unset=True)
+    update_data = resume_data.model_dump(
+        exclude_unset=True
+    )
 
     for field, value in update_data.items():
         setattr(resume, field, value)
@@ -123,6 +142,9 @@ def update_resume(
     return resume
 
 
+# ==========================================================
+# DELETE RESUME
+# ==========================================================
 
 @router.delete(
     "/{resume_id}",
@@ -148,3 +170,5 @@ def delete_resume(
 
     db.delete(resume)
     db.commit()
+
+    return None

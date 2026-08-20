@@ -658,68 +658,132 @@ export function ResumeProvider({ children }) {
    * ensureResumeExists
    * ───────────────────────────────────────────────────────────────────────── */
 
-  const ensureResumeExists =
-    useCallback(
-      async (title) => {
-        if (currentResumeId) {
-          return currentResumeId
-        }
+  /* ─────────────────────────────────────────────────────────────────────────
+ * ensureResumeExists
+ *
+ * Creates the backend Resume exactly once.
+ *
+ * templateIdOverride is important because the Profile/Template page can
+ * explicitly tell us which template was selected in the current navigation.
+ * This prevents stale activeTemplateId state from creating the resume with
+ * the wrong template.
+ * ───────────────────────────────────────────────────────────────────────── */
 
-        try {
-          
-          const { data } =
-            await resumeApi.create({
-              title:
-                title ||
-                'Untitled Resume',
+const ensureResumeExists =
+  useCallback(
+    async (
+      title,
+      templateIdOverride = null
+    ) => {
+      /*
+       * If we already have a real backend resume ID,
+       * NEVER create another resume.
+       */
+      if (currentResumeId) {
+        return currentResumeId
+      }
 
-              template: 'classic',
-            })
+      try {
+        const requestedTemplateId =
+          templateIdOverride ??
+          activeTemplateId ??
+          1
 
-          setCurrentResumeId(
-            data.id
-          )
+        const normalizedTemplateId =
+          Number(requestedTemplateId)
 
-      
-          const createdTemplateId =
-            Number(
-              data?.template_id ??
-              data?.templateId ??
-              activeTemplateId ??
-              1
-            )
+        const templateId =
+          Number.isInteger(
+            normalizedTemplateId
+          ) && normalizedTemplateId > 0
+            ? normalizedTemplateId
+            : 1
 
-          if (
-            Number.isInteger(
-              createdTemplateId
-            ) &&
-            createdTemplateId > 0
-          ) {
-            switchTemplate(
-              createdTemplateId
-            )
-          }
+        /*
+         * Keep Context synchronized with the template being used
+         * to create this resume.
+         */
+        switchTemplate(templateId)
 
-          await loadResumes()
+        const { data } =
+          await resumeApi.create({
+            title:
+              title ||
+              'Untitled Resume',
 
-          return data.id
-        } catch (err) {
+            /*
+             * This is the actual template selected by the user.
+             */
+            template_id: templateId,
+
+            /*
+             * Keep the old category for backend compatibility.
+             */
+            template: 'classic',
+          })
+
+        if (!data?.id) {
           console.error(
-            'ensureResumeExists failed:',
-            err
+            'Resume creation succeeded but no resume ID was returned:',
+            data
           )
 
           return null
         }
-      },
-      [
-        currentResumeId,
-        activeTemplateId,
-        setCurrentResumeId,
-        switchTemplate,
-        loadResumes,
-      ]
-    )
+
+        /*
+         * Store ONLY the real backend ID.
+         */
+        setCurrentResumeId(
+          data.id
+        )
+
+        /*
+         * Prefer the template returned by backend.
+         * Fall back to the template we requested.
+         */
+        const createdTemplateId =
+          Number(
+            data?.template_id ??
+            data?.templateId ??
+            templateId
+          )
+
+        if (
+          Number.isInteger(
+            createdTemplateId
+          ) &&
+          createdTemplateId > 0
+        ) {
+          switchTemplate(
+            createdTemplateId
+          )
+        }
+
+        /*
+         * Refresh dashboard/resume list so the newly-created
+         * resume immediately exists in savedResumes.
+         */
+        await loadResumes()
+
+        return data.id
+      } catch (err) {
+        console.error(
+          'ensureResumeExists failed:',
+          err
+        )
+
+        return null
+      }
+    },
+    [
+      currentResumeId,
+      activeTemplateId,
+      setCurrentResumeId,
+      switchTemplate,
+      loadResumes,
+    ]
+  )
 
   /* ─────────────────────────────────────────────────────────────────────────
    * saveExperiencesToBackend
@@ -1140,17 +1204,41 @@ export function ResumeProvider({ children }) {
 
           if (!rid) return false
 
+          const normalizedFields = {
+            ...fields,
+          }
+
+          // Frontend callers may use templateId while the backend expects
+          // template_id. Normalize it before sending the request.
+          const requestedTemplateId =
+            fields?.template_id ??
+            fields?.templateId
+
+          if (
+            requestedTemplateId !== undefined &&
+            requestedTemplateId !== null
+          ) {
+            const normalizedTemplateId = Number(requestedTemplateId)
+
+            if (
+              Number.isInteger(normalizedTemplateId) &&
+              normalizedTemplateId > 0
+            ) {
+              normalizedFields.template_id = normalizedTemplateId
+              delete normalizedFields.templateId
+            }
+          }
+
           await resumeApi.update(
             rid,
-            fields
+            normalizedFields
           )
 
           await loadResumes()
 
           const templateId =
             Number(
-              fields?.template_id ??
-              fields?.templateId
+              normalizedFields?.template_id
             )
 
           if (
