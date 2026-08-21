@@ -7,8 +7,12 @@ from app.api.dependencies import get_current_user
 from app.database.session import get_db
 from app.models.resume import Resume
 from app.models.user import User
+from app.services.resume_canonicalization_service import (
+    find_canonical_resume_id,
+)
 from app.schemas.resume import (
     ResumeCreate,
+    ResumeCanonicalizationResponse,
     ResumeResponse,
     ResumeUpdate,
 )
@@ -34,22 +38,6 @@ def create_resume(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    existing_resume = db.scalar(
-        select(Resume)
-        .where(
-            Resume.user_id == current_user.id,
-            Resume.template_id == resume_data.template_id,
-            Resume.job_description_id == resume_data.job_description_id,
-        )
-        .order_by(
-            Resume.updated_at.desc(),
-            Resume.id.desc(),
-        )
-    )
-
-    if existing_resume is not None:
-        return existing_resume
-
     resume = Resume(
         user_id=current_user.id,
         title=resume_data.title,
@@ -88,7 +76,42 @@ def get_resumes(
         )
     ).all()
 
-    return resumes
+    unique_resumes = {}
+    for resume in resumes:
+        unique_resumes.setdefault(resume.id, resume)
+
+    return list(unique_resumes.values())
+
+
+# ==========================================================
+# CANONICALIZE PERSISTED RESUME CONTENT
+# ==========================================================
+
+@router.post(
+    "/{resume_id}/canonicalize",
+    response_model=ResumeCanonicalizationResponse,
+)
+def canonicalize_resume(
+    resume_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    resume = db.scalar(
+        select(Resume).where(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id,
+        )
+    )
+
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found",
+        )
+
+    return ResumeCanonicalizationResponse(
+        canonical_resume_id=find_canonical_resume_id(db, resume),
+    )
 
 
 # ==========================================================

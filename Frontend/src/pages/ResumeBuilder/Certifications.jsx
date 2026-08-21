@@ -191,6 +191,7 @@ export default function Certifications() {
     saveCertificationsToBackend,
     saveLanguagesToBackend,
     saveAchievementsToBackend,
+    finalizeResume,
     currentResumeId,
     resumeTitle,
   } = useResume()
@@ -300,6 +301,7 @@ export default function Certifications() {
         const value = typeof achievement === 'string' ? achievement : achievement.title
         return value?.trim()
       }), rid)
+      await finalizeResume(rid)
     } catch (err) {
       console.error('Backend save failed (certifications/languages/achievements):', err)
       setSaveError(err.response?.data?.detail || err.message || 'Failed to save certifications, languages, or achievements')

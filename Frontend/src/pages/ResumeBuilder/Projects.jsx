@@ -79,7 +79,7 @@ export default function Projects() {
   const templateId = params.get('template') || '1'
 
   const { projects: ctxProjects, setProjects: setContextProjects, setProjectsSaved,
-      ensureResumeExists, saveProjectsToBackend, resumeTitle } = useResume()
+      ensureResumeExists, saveProjectsToBackend, finalizeResume, resumeTitle } = useResume()
 
   // Ensure the correct template's data is active when entering this page
   const _projCtx = useResume()
@@ -198,6 +198,7 @@ export default function Projects() {
       const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
       if (rid) {
         await saveProjectsToBackend(projects, rid)
+        await finalizeResume(rid)
       }
     } catch (err) {
       console.error('Backend save failed (projects):', err)

@@ -589,14 +589,22 @@ export function ResumeProvider({ children }) {
               ? data.items
               : []
 
-        setSavedResumes(resumes)
+        const uniqueResumes = Array.from(
+          new Map(
+            resumes
+              .filter((resume) => resume?.id != null)
+              .map((resume) => [String(resume.id), resume])
+          ).values()
+        )
+
+        setSavedResumes(uniqueResumes)
 
         // If the stored currentResumeId is not in the fetched list,
         // it's a stale or fake ID — clear it so the dashboard doesn't
         // fire a request with a non-existent ID.
         setCurrentResumeIdRaw((prev) => {
           if (!prev) return prev
-          const exists = resumes.some((r) => String(r.id) === String(prev))
+          const exists = uniqueResumes.some((r) => String(r.id) === String(prev))
           if (exists) return prev
           // Clear from localStorage too
           try {
@@ -607,7 +615,7 @@ export function ResumeProvider({ children }) {
           return null
         })
 
-        return resumes
+        return uniqueResumes
       } catch (err) {
         console.error(
           'loadResumes failed:',
@@ -756,6 +764,27 @@ export function ResumeProvider({ children }) {
     useCallback(async () => {
       return await loadResumes()
     }, [loadResumes])
+
+  const finalizeResume =
+    useCallback(
+      async (resumeId) => {
+        if (!resumeId) {
+          throw new Error('A resume ID is required to finalize a resume.')
+        }
+
+        const { data } = await resumeApi.canonicalize(resumeId)
+        const canonicalResumeId = data?.canonical_resume_id
+
+        if (!canonicalResumeId) {
+          throw new Error('The backend did not return a canonical resume ID.')
+        }
+
+        await loadResume(canonicalResumeId)
+        await loadResumes()
+        return canonicalResumeId
+      },
+      [loadResume, loadResumes]
+    )
 
   /* ─────────────────────────────────────────────────────────────────────────
    * Load backend resumes when authenticated
@@ -1512,8 +1541,8 @@ const ensureResumeExists =
             const byId =
               prev.findIndex(
                 (r) =>
-                  r.id ===
-                  resume.id
+                  String(r.id) ===
+                  String(resume.id)
               )
 
             if (byId !== -1) {
@@ -1523,26 +1552,6 @@ const ensureResumeExists =
 
               next[byId] = {
                 ...prev[byId],
-                ...resume,
-              }
-
-              return next
-            }
-
-            const byTitle =
-              prev.findIndex(
-                (r) =>
-                  r.title ===
-                  resume.title
-              )
-
-            if (byTitle !== -1) {
-              const next = [
-                ...prev,
-              ]
-
-              next[byTitle] = {
-                ...prev[byTitle],
                 ...resume,
               }
 
@@ -2017,6 +2026,7 @@ const ensureResumeExists =
         loadResumes,
         loadResume,
         refreshResumes,
+        finalizeResume,
 
         currentResumeId,
         setCurrentResumeId,

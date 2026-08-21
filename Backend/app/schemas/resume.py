@@ -82,3 +82,7 @@ class ResumeResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class ResumeCanonicalizationResponse(BaseModel):
+    canonical_resume_id: int

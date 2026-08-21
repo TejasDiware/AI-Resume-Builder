@@ -53,7 +53,7 @@ export default function Education() {
   const templateId = params.get('template') || '1'
 
   const { education: ctxEducation, setEducation, setEducationSaved,
-          currentResumeId, saveEducationToBackend } = useResume()
+          currentResumeId, saveEducationToBackend, finalizeResume } = useResume()
 
   const mapCtx = (e) => ({
     id:          e.id,
@@ -163,6 +163,7 @@ export default function Education() {
       const rid = currentResumeId
       if (!rid) throw new Error('Select or create a resume before saving education.')
       await saveEducationToBackend(entries, rid)
+      await finalizeResume(rid)
       setEducationSaved(true)
       setSaved(true)
       setTimeout(() => {

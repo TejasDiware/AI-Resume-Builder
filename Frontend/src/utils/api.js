@@ -71,6 +71,9 @@ export const resumeApi = {
   get: (id) =>
     api.get(`/api/v1/resumes/${id}`),
 
+  canonicalize: (id) =>
+    api.post(`/api/v1/resumes/${id}/canonicalize`),
+
   update: (id, data) =>
     api.put(`/api/v1/resumes/${id}`, data),
 

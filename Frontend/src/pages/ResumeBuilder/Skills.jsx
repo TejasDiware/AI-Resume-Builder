@@ -55,7 +55,7 @@ export default function Skills() {
   const templateId = params.get('template') || '1'
 
   const { skills: ctxSkills, setSkills: setContextSkills, setSkillsSaved,
-      currentResumeId, saveSkillsToBackend } = useResume()
+      currentResumeId, saveSkillsToBackend, finalizeResume } = useResume()
 
     const toSkillObject = (skill) => typeof skill === 'string'
       ? { name: skill, category: '', proficiency: '' }
@@ -131,6 +131,7 @@ export default function Skills() {
       const rid = currentResumeId
       if (!rid) throw new Error('Select or create a resume before saving skills.')
       await saveSkillsToBackend(keySkills, rid)
+      await finalizeResume(rid)
       setSkillsSaved(true)
       setSaved(true)
       safeNavigate(navigate, `/app/resume-builder/projects?template=${templateId}`, { replace: true })

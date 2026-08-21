@@ -170,10 +170,6 @@ export default function Resume() {
 
   // Use context savedResumes — shared across pages
   const resumes    = ctx?.savedResumes || []
-  const setResumes = (updater) => {
-    const next = typeof updater === 'function' ? updater(resumes) : updater
-    ctx?.setSavedResumes?.(next)
-  }
 
   const openModal = () => {
     setTitle('')
@@ -301,6 +297,7 @@ export default function Resume() {
       }
 
       await resumeApi.upload(resumeId, file)
+      const canonicalResumeId = await ctx?.finalizeResume?.(resumeId) || resumeId
 
       const [
         educationResponse,
@@ -312,13 +309,13 @@ export default function Resume() {
         achievementsResponse,
         profileResponse,
       ] = await Promise.all([
-        resumeApi.getEducation(resumeId),
-        resumeApi.getExperience(resumeId),
-        resumeApi.getSkills(resumeId),
-        resumeApi.getProjects(resumeId),
-        certificationApi.list(resumeId),
-        languageApi.list(resumeId),
-        achievementApi.list(resumeId),
+        resumeApi.getEducation(canonicalResumeId),
+        resumeApi.getExperience(canonicalResumeId),
+        resumeApi.getSkills(canonicalResumeId),
+        resumeApi.getProjects(canonicalResumeId),
+        certificationApi.list(canonicalResumeId),
+        languageApi.list(canonicalResumeId),
+        achievementApi.list(canonicalResumeId),
         profileApi.get(),
       ])
 
@@ -403,8 +400,8 @@ export default function Resume() {
       }
 
       ctx?.setResumeTitle?.(cvTitle)
-      ctx?.setCurrentResumeId?.(resumeId)
-      await ctx?.loadResume?.(resumeId)
+      ctx?.setCurrentResumeId?.(canonicalResumeId)
+      await ctx?.loadResume?.(canonicalResumeId)
       ctx?.setProfileSaved?.(true)
       ctx?.setExperienceSaved?.(true)
       ctx?.setEducationSaved?.(true)
@@ -412,13 +409,7 @@ export default function Resume() {
       ctx?.setProjectsSaved?.(true)
       ctx?.setPortfolioSaved?.(true)
 
-      setResumes(prev => [...prev, {
-        id: resumeId,
-        title: cvTitle,
-        templateId: 1,
-        score: 75,
-        createdAt: new Date().toLocaleDateString(),
-      }])
+      await ctx?.refreshResumes?.()
 
       navigate(`/app/profile?template=1&imported=1`)
     } catch (err) {

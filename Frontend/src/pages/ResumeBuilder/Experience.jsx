@@ -100,7 +100,7 @@ export default function Experience() {
   const ctx = useResume()
   const {
     experiences: ctxExperiences, setExperiences, setExperienceSaved,
-    currentResumeId, saveExperiencesToBackend,
+    currentResumeId, saveExperiencesToBackend, finalizeResume,
   } = ctx
 
   const [entries, setEntries] = useState(() =>
@@ -159,6 +159,7 @@ export default function Experience() {
       const rid = currentResumeId
       if (!rid) throw new Error('Select or create a resume before saving experience.')
       await saveExperiencesToBackend(entries, rid)
+      await finalizeResume(rid)
       setExperienceSaved(true)
       setSaved(true)
       setTimeout(() => {
