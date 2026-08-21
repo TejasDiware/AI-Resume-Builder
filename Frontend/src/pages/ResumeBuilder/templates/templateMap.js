@@ -6,7 +6,6 @@ import Template2Brian         from './Template2Brian'
 import Template1DarkNavy      from './Template1DarkNavy'
 import Template4Wendy         from './Template4Wendy'
 import Template5Fresher       from './Template5Fresher'
-import Template6ATS           from './Template6ATS'
 import Template7SlateBlue     from './Template7SlateBlue'
 import Template12CharcoalSidebar from './Template12CharcoalSidebar'
 import Template15EnhancvPro from './Template15EnhancvPro'
@@ -27,7 +26,6 @@ const templateMap = {
   2:  { name: 'Brian Professional',   category: 'Professional', Component: Template2Brian        },
   4:  { name: 'Minimal ATS',          category: 'Minimal',      Component: Template4Wendy        },
   5:  { name: 'Fresher Classic',      category: 'Modern',       Component: Template5Fresher      },
-  6:  { name: 'ATS Single Column',    category: 'Minimal',      Component: Template6ATS          },
   7:  { name: 'Slate Blue Sidebar',   category: 'Professional', Component: Template7SlateBlue    },
   12: { name: 'Charcoal Sidebar',     category: 'Professional', Component: Template12CharcoalSidebar },
   15: { name: 'Enhancv Professional', category: 'Professional', Component: Template15EnhancvPro  },

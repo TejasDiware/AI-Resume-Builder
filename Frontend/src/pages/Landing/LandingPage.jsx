@@ -14,7 +14,7 @@ const features = [
   { icon: <MdCloudDownload />, title: 'Download & Share', text: 'Download your resume in PDF or DOCX format and share it instantly.', tone: 'pink' },
 ]
 
-const landingTemplateIds = [1, 2, 4, 5, 6, 15]
+const landingTemplateIds = [1, 2, 4, 5,7, 15]
 
 function LandingTemplatePreview({ Component }) {
   return (

@@ -343,7 +343,7 @@ export default function Certifications() {
         <div style={cardStyle}>
           <SectionTitle icon={<span style={{ fontSize: 18 }}>⚙️</span>} title="Technical Skills (Detailed)" color="#7c3aed" />
           <p style={{ fontSize: '0.78rem', color: '#9ca3af', marginBottom: 14, marginTop: -8 }}>
-            These appear in the ATS Single Column template as labelled skill rows.
+            These appear as labelled skill rows in supported resume templates.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {skillFields.map(({ key, label }) => (
