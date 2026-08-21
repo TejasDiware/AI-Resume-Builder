@@ -5,6 +5,7 @@ import {
   MdOutlineAccountCircle,
   MdOutlineLogout,
   MdOutlineDescription,
+  MdAssessment,
 } from 'react-icons/md'
 import { FaRobot } from 'react-icons/fa'
 import { useAuth } from '../context/AuthContext'
@@ -15,6 +16,8 @@ const navItems = [
   { label: 'Templates',   icon: <MdOutlineArticle size={20} />,        path: '/app/templates' },
   { label: 'AI Assistant', icon: <FaRobot size={18} />,                path: '/app/ai-assistant', highlight: true },
   { label: 'ATS Checker', icon: <FaRobot size={18} />,                 path: '/app/ats-checker', highlight: true },
+  { label: 'Job Descriptions', icon: <MdOutlineDescription size={20} />, path: '/app/job-descriptions' },
+  { label: 'Resume Quality', icon: <MdAssessment size={20} />, path: '/app/resume-quality' },
   
 ]
 

@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { MdDownload, MdSave, MdCheckCircle } from 'react-icons/md'
 import { useResume } from '../../context/ResumeContext'
+import { pdfApi } from '../../utils/api'
 import templateMap from './templates/templateMap'
 
 const A4_W = 794
@@ -90,21 +91,21 @@ export default function Preview() {
   const printRef  = useRef()
   const ctx       = useResume()
 
-  const params     = new URLSearchParams(location.search)
-  const initId     = parseInt(params.get('template') || '1', 10)
-
-  const [selectedId, setSelectedId] = useState(templateMap[initId] ? initId : 1)
+  const [selectedId, setSelectedId] = useState(1)
   const [saved, setSaved]           = useState(false)
+  const [saving, setSaving]         = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [error, setError]           = useState('')
 
-  // On mount: sync the context to the template id from the URL
+  // The backend-hydrated context is authoritative when the active resume changes.
   useEffect(() => {
-    const id = templateMap[initId] ? initId : 1
-    ctx?.switchTemplate?.(id)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    const id = Number(ctx?.activeTemplateId)
+    if (templateMap[id]) setSelectedId(id)
+  }, [ctx?.activeTemplateId])
 
   // Keep context in sync whenever a different template is picked
   const handleTemplateSwitch = (id) => {
+    setError('')
     setSelectedId(id)
     ctx?.switchTemplate?.(id)
   }
@@ -115,56 +116,70 @@ export default function Preview() {
   const allTemplates = Object.entries(templateMap).map(([id, t]) => ({ id: Number(id), ...t }))
 
   // ── Save resume to dashboard ──────────────────────────────────────────────
-  const handleSave = () => {
-    const p     = ctx?.profileData
-    const title = ctx?.resumeTitle || (p ? `${p.firstName} ${p.lastName}`.trim() : '') || 'My Resume'
-    const score = (() => {
-      let s = 0
-      if (p?.firstName || p?.lastName)   s += 20
-      if (p?.email)                       s += 10
-      if (p?.phone)                       s += 10
-      if (ctx?.experiences?.length > 0)  s += 20
-      if (ctx?.skills?.length > 0)       s += 20
-      if (ctx?.summary)                  s += 20
-      return s
-    })()
+  const handleSave = async () => {
+    if (!ctx?.currentResumeId || saving) return
 
-    // addResume handles deduplication by title — same resume will be updated,
-    // not pushed as a new entry. No duplicate on repeated Save clicks.
-    ctx?.addResume?.({ id: Date.now(), title, templateId: selectedId, score, createdAt: new Date().toLocaleDateString() })
+    setSaving(true)
+    setError('')
+    try {
+      const persisted = await ctx.saveResumeMeta?.({ template_id: selectedId })
+      if (!persisted) throw new Error('The resume could not be saved.')
 
-    setSaved(true)
-    setTimeout(() => { setSaved(false); navigate('/app/dashboard') }, 1000)
+      await ctx.loadResume?.(ctx.currentResumeId)
+      setSaved(true)
+      setTimeout(() => {
+        setSaved(false)
+        navigate('/app/dashboard')
+      }, 1000)
+    } catch (err) {
+      console.error('Resume save failed:', err)
+      setError('Unable to save template selection.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   // ── Download PDF ──────────────────────────────────────────────────────────
   const handleDownload = async () => {
-    if (!printRef.current || downloading) return
+    if (downloading) return
+    if (!ctx?.currentResumeId) {
+      setError('No resume selected.')
+      return
+    }
+
     setDownloading(true)
+    setError('')
     try {
-      const html2pdf = (await import('html2pdf.js')).default
       const p     = ctx?.profileData
       const fname = (p?.firstName && p?.lastName) ? `${p.firstName}_${p.lastName}_Resume` : 'Resume'
 
-      const worker = html2pdf()
-        .set({
-          margin: PDF_MARGIN,
-          filename: `${fname}.pdf`,
-          image: { type: 'jpeg', quality: 1 },
-          html2canvas: { scale: 2, useCORS: true, logging: false, width: A4_W, windowWidth: A4_W },
-          jsPDF: { unit: 'px', format: [A4_W, A4_H], orientation: 'portrait' },
-        })
-        .from(printRef.current)
-        .toPdf()
-      const pdf = await worker.get('pdf')
-
-      addInvisibleTextLayer(pdf, printRef.current)
-      pdf.save(`${fname}.pdf`)
+      const { data } = await pdfApi.download(ctx.currentResumeId)
+      const url = window.URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${fname}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error('PDF download failed:', err)
+      setError('Unable to generate/download PDF.')
     } finally {
       setDownloading(false)
     }
+  }
+
+  if (ctx?.resumeLoading) {
+    return <div style={{ padding: 32 }}>Loading resume...</div>
+  }
+
+  if (!ctx?.currentResumeId) {
+    return <div style={{ padding: 32 }}>No resume selected.</div>
+  }
+
+  if (ctx?.resumeError) {
+    return <div style={{ padding: 32 }}>Unable to load resume.</div>
   }
 
   return (
@@ -250,6 +265,12 @@ export default function Preview() {
             Template: <span style={{ color: '#4f46e5' }}>{name}</span>
           </span>
 
+          {error && (
+            <span role="alert" style={{ fontSize: '0.8rem', color: '#b91c1c', fontWeight: 600 }}>
+              {error}
+            </span>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {saved && (
               <span style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -258,10 +279,11 @@ export default function Preview() {
             )}
             <button
               onClick={handleSave}
+              disabled={saving}
               style={{
                 background: '#22c55e', color: '#fff', border: 'none',
                 borderRadius: 999, padding: '8px 18px', fontSize: '0.82rem',
-                fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                fontWeight: 600, cursor: saving ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
               <MdSave size={15} /> Save

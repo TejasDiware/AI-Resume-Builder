@@ -4,8 +4,15 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
 } from 'react'
-import { resumeApi, profileApi } from '../utils/api'
+import {
+  achievementApi,
+  certificationApi,
+  languageApi,
+  profileApi,
+  resumeApi,
+} from '../utils/api'
 
 const ResumeContext = createContext(null)
 
@@ -13,6 +20,27 @@ export { ResumeContext }
 
 const STORAGE_KEY = 'rb_resume_data'
 const SHARED_KEY = 'rb_resume_shared'
+const RESUME_SCOPED_FIELDS = new Set([
+  'experiences',
+  'education',
+  'skills',
+  'skillsDetailed',
+  'projects',
+  'summary',
+  'resumeTitle',
+  'certifications',
+  'achievements',
+  'languages',
+  'interests',
+  'hobbies',
+  'references',
+  'profileSaved',
+  'experienceSaved',
+  'educationSaved',
+  'skillsSaved',
+  'projectsSaved',
+  'portfolioSaved',
+])
 
 function readStore(key) {
   try {
@@ -35,6 +63,8 @@ function writeStore(key, obj) {
 }
 
 function load(field, fallback) {
+  if (RESUME_SCOPED_FIELDS.has(field)) return fallback
+
   const store = readStore(STORAGE_KEY)
 
   return store[field] !== undefined
@@ -55,15 +85,11 @@ function usePersisted(field, fallback) {
             ? next(prev)
             : next
 
-        const store =
-          readStore(STORAGE_KEY)
-
-        store[field] = resolved
-
-        writeStore(
-          STORAGE_KEY,
-          store
-        )
+        if (!RESUME_SCOPED_FIELDS.has(field)) {
+          const store = readStore(STORAGE_KEY)
+          store[field] = resolved
+          writeStore(STORAGE_KEY, store)
+        }
 
         return resolved
       })
@@ -72,6 +98,154 @@ function usePersisted(field, fallback) {
   )
 
   return [value, set]
+}
+
+function toEditorDate(value) {
+  return value ? String(value).slice(0, 10) : ''
+}
+
+function normalizeResumeSections({
+  profile,
+  experience,
+  education,
+  skills,
+  projects,
+  certifications,
+  languages,
+  achievements,
+}) {
+  const normalizedProfile = profile
+    ? {
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        phone: profile.phone || '',
+        profession: profile.professional_title || '',
+        summary: profile.summary || '',
+        city: profile.location || '',
+        email: profile.email || '',
+        languages: (languages || []).map((item) => ({
+          language: item.name || '',
+          proficiency: item.proficiency || '',
+        })).filter((item) => item.language),
+      }
+    : null
+
+  return {
+    profile: normalizedProfile,
+    websites: {
+      linkedin: profile?.linkedin_url || '',
+      github: profile?.github_url || '',
+      portfolio: profile?.portfolio_url || '',
+      other: '',
+    },
+    experience: (experience || []).map((item) => ({
+      id: item.id,
+      jobTitle: item.job_title || '',
+      employer: item.company || '',
+      employerOther: '',
+      city: item.location || '',
+      state: '',
+      startDate: toEditorDate(item.start_date),
+      endDate: toEditorDate(item.end_date),
+      currentWork: Boolean(item.is_current),
+      description: item.description || '',
+    })),
+    education: (education || []).map((item) => ({
+      id: item.id,
+      institution: item.institution || '',
+      schoolName: item.institution || '',
+      degree: item.degree || '',
+      fieldStudy: item.field_of_study || '',
+      fieldOfStudy: item.field_of_study || '',
+      startYear: item.start_date ? String(item.start_date).slice(0, 4) : '',
+      endYear: item.end_date ? String(item.end_date).slice(0, 4) : '',
+      startDate: toEditorDate(item.start_date),
+      endDate: toEditorDate(item.end_date),
+      description: item.description || '',
+    })),
+    skills: (skills || []).map((item) => ({
+      id: item.id,
+      name: item.name || '',
+      category: item.category || '',
+      proficiency: item.proficiency || '',
+    })),
+    projects: (projects || []).map((item) => ({
+      ...item,
+      id: item.id,
+      title: item.title || '',
+      role: item.role || '',
+      description: item.description || '',
+      technologies: item.technologies || '',
+      project_url: item.project_url || '',
+      startDate: toEditorDate(item.start_date),
+      endDate: toEditorDate(item.end_date),
+      ongoing: !item.end_date,
+    })),
+    certifications: (certifications || []).map((item) => ({
+      ...item,
+      id: item.id,
+      name: item.name || '',
+      issuer: item.issuing_organization || '',
+      year: item.issue_date ? String(item.issue_date).slice(0, 4) : '',
+      credentialId: item.credential_id || '',
+      credentialUrl: item.credential_url || '',
+    })),
+    languages: (languages || []).map((item) => ({
+      ...item,
+      id: item.id,
+      name: item.name || '',
+      language: item.name || '',
+      proficiency: item.proficiency || '',
+    })),
+    achievements: (achievements || []).map((item) => ({
+      ...item,
+      id: item.id,
+      title: item.title || '',
+      description: item.description || '',
+      organization: item.organization || '',
+      year: item.year || '',
+    })),
+  }
+}
+
+async function reconcileResumeCollection({
+  api,
+  resumeId,
+  entries,
+  toPayload,
+  assertActive,
+}) {
+  assertActive()
+  const { data: existing } = await api.list(resumeId)
+  const existingById = new Map((existing || []).map((item) => [String(item.id), item]))
+  const retainedIds = new Set()
+
+  for (const entry of entries || []) {
+    assertActive()
+    const existingItem = entry.id == null
+      ? null
+      : existingById.get(String(entry.id))
+    const payload = toPayload(entry)
+
+    if (existingItem) {
+      retainedIds.add(String(existingItem.id))
+      await api.update(resumeId, existingItem.id, payload)
+    } else {
+      await api.create(resumeId, payload)
+    }
+  }
+
+  for (const item of existing || []) {
+    assertActive()
+    if (!retainedIds.has(String(item.id))) {
+      await api.delete(resumeId, item.id)
+    }
+  }
+
+  assertActive()
+  const { data: saved } = await api.list(resumeId)
+  assertActive()
+  return Array.isArray(saved) ? saved : []
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -246,6 +420,12 @@ export function ResumeProvider({ children }) {
   const [resumesError, setResumesError] =
     useState('')
 
+  const [resumeLoading, setResumeLoading] =
+    useState(false)
+
+  const [resumeError, setResumeError] =
+    useState('')
+
   const [currentResumeId, setCurrentResumeIdRaw] =
     useState(() => {
       const store = readStore(SHARED_KEY)
@@ -270,6 +450,12 @@ export function ResumeProvider({ children }) {
 
       return null
     })
+
+  const [currentResume, setCurrentResume] = useState(null)
+  const hydratedResumeIdRef = useRef(null)
+  const hydrationRequestRef = useRef(0)
+  const loadingResumeIdRef = useRef(null)
+  const activeResumeIdRef = useRef(currentResumeId)
 
   /* ── Current resume ID persistence ───────────────────────────────────── */
 
@@ -299,6 +485,8 @@ export function ResumeProvider({ children }) {
         }
 
         writeStore(SHARED_KEY, store)
+
+        activeResumeIdRef.current = isRealId ? resolved : null
 
         return isRealId ? resolved : null
       })
@@ -408,7 +596,7 @@ export function ResumeProvider({ children }) {
         // fire a request with a non-existent ID.
         setCurrentResumeIdRaw((prev) => {
           if (!prev) return prev
-          const exists = resumes.some((r) => r.id === prev)
+          const exists = resumes.some((r) => String(r.id) === String(prev))
           if (exists) return prev
           // Clear from localStorage too
           try {
@@ -437,6 +625,129 @@ export function ResumeProvider({ children }) {
       }
     }, [])
 
+  const loadResume = useCallback(async (resumeId) => {
+    if (!resumeId) {
+      throw new Error('A resume ID is required to load a resume.')
+    }
+
+    const requestId = hydrationRequestRef.current + 1
+    hydrationRequestRef.current = requestId
+    const normalizedResumeId = String(resumeId)
+    loadingResumeIdRef.current = normalizedResumeId
+    hydratedResumeIdRef.current = null
+    activeResumeIdRef.current = resumeId
+    setResumeLoading(true)
+    setResumeError('')
+    setCurrentResumeId(resumeId)
+    setCurrentResume(null)
+    setExperiences([])
+    setEducation([])
+    setSkills([])
+    setProjects([])
+    setCertifications([])
+    setLanguages([])
+    setAchievements([])
+
+    try {
+      const [resumeResponse, profileResponse, experienceResponse,
+        educationResponse, skillsResponse, projectsResponse,
+        certificationsResponse, languagesResponse, achievementsResponse] =
+        await Promise.all([
+          resumeApi.get(resumeId),
+          profileApi.get().catch((error) => {
+            if (error.response?.status === 404) return { data: null }
+            throw error
+          }),
+          resumeApi.getExperience(resumeId),
+          resumeApi.getEducation(resumeId),
+          resumeApi.getSkills(resumeId),
+          resumeApi.getProjects(resumeId),
+          certificationApi.list(resumeId),
+          languageApi.list(resumeId),
+          achievementApi.list(resumeId),
+        ])
+
+      const resume = resumeResponse.data
+      if (
+        hydrationRequestRef.current !== requestId ||
+        String(resume.id) !== normalizedResumeId
+      ) {
+        return null
+      }
+
+      const sectionForResume = (items) =>
+        (Array.isArray(items) ? items : []).filter(
+          (item) => String(item.resume_id) === normalizedResumeId
+        )
+
+      const normalized = normalizeResumeSections({
+        profile: profileResponse.data,
+        experience: sectionForResume(experienceResponse.data),
+        education: sectionForResume(educationResponse.data),
+        skills: sectionForResume(skillsResponse.data),
+        projects: sectionForResume(projectsResponse.data),
+        certifications: sectionForResume(certificationsResponse.data),
+        languages: sectionForResume(languagesResponse.data),
+        achievements: sectionForResume(achievementsResponse.data),
+      })
+
+      setCurrentResume(resume)
+      hydratedResumeIdRef.current = String(resume.id)
+      switchTemplate(resume.template_id)
+
+      if (normalized.profile) setProfileData(normalized.profile)
+      else setProfileData((previous) => ({ ...previous, languages: [] }))
+      setWebsites(normalized.websites)
+      setExperiences(normalized.experience)
+      setEducation(normalized.education)
+      setSkills(normalized.skills)
+      setProjects(normalized.projects)
+      setCertifications(normalized.certifications)
+      setLanguages(normalized.languages)
+      setAchievements(normalized.achievements)
+      setSkillsDetailed({
+        programmingLanguages: '',
+        frameworks: '',
+        frontend: '',
+        backend: '',
+        databases: '',
+        tools: '',
+        versionControl: '',
+        other: '',
+      })
+      setInterests([])
+      setHobbies([])
+      setReferences([])
+      setSummary(normalized.profile?.summary || '')
+      setResumeTitle(resume.title || '')
+
+      return resume
+    } finally {
+      if (hydrationRequestRef.current === requestId) {
+        setResumeLoading(false)
+        loadingResumeIdRef.current = null
+      }
+    }
+  }, [
+    setCurrentResumeId,
+    setProfileData,
+    setWebsites,
+    setExperiences,
+    setEducation,
+    setSkills,
+    setProjects,
+    setCertifications,
+    setLanguages,
+    setAchievements,
+    setSkillsDetailed,
+    setInterests,
+    setHobbies,
+    setReferences,
+    setSummary,
+    setResumeTitle,
+    switchTemplate,
+  ])
+
   /* ─────────────────────────────────────────────────────────────────────────
    * Refresh resumes
    * ───────────────────────────────────────────────────────────────────────── */
@@ -463,6 +774,26 @@ export function ResumeProvider({ children }) {
     loadResumes()
   }, [loadResumes])
 
+  useEffect(() => {
+    const token = localStorage.getItem('rb_token')
+    if (!token || !currentResumeId) return
+    if (hydratedResumeIdRef.current === String(currentResumeId)) return
+
+    loadResume(currentResumeId).catch((error) => {
+      loadingResumeIdRef.current = null
+      setResumeLoading(false)
+      setResumeError(
+        error.response?.data?.detail ||
+        'Unable to load resume.',
+      )
+      console.error('loadResume failed:', error)
+      setResumesError(
+        error.response?.data?.detail ||
+        'Failed to load the selected resume',
+      )
+    })
+  }, [currentResumeId, loadResume])
+
   /* ─────────────────────────────────────────────────────────────────────────
    * Load profile from backend on mount
    * ───────────────────────────────────────────────────────────────────────── */
@@ -475,7 +806,7 @@ export function ResumeProvider({ children }) {
         'access_token'
       )
 
-    if (!token) return
+    if (!token || currentResumeId) return
 
     profileApi
       .get()
@@ -533,7 +864,7 @@ export function ResumeProvider({ children }) {
       .catch(() => {
         /* use localStorage if backend unavailable */
       })
-  }, [setProfileData, setSummary, setWebsites])
+  }, [currentResumeId, setProfileData, setSummary, setWebsites])
 
   /* ── Auth ─────────────────────────────────────────────────────────────── */
 
@@ -548,6 +879,9 @@ export function ResumeProvider({ children }) {
       setIsAuthenticated(false)
       setSavedResumes([])
       setCurrentResumeId(null)
+      setCurrentResume(null)
+      hydratedResumeIdRef.current = null
+      loadingResumeIdRef.current = null
 
       switchTemplate(1)
     }, [
@@ -795,112 +1129,59 @@ const ensureResumeExists =
         entries,
         resumeId
       ) => {
-        try {
-          const rid =
-            resumeId ||
-            currentResumeId
-
-          if (!rid) return false
-
-          const {
-            data: experiences,
-          } = await resumeApi.getExperience(
-            rid
-          )
-
-          await Promise.all(
-            (
-              experiences ||
-              []
-            ).map((e) =>
-              resumeApi.deleteExperience(
-                rid,
-                e.id
-              )
-            )
-          )
-
-          for (
-            let i = 0;
-            i < entries.length;
-            i++
-          ) {
-            const e = entries[i]
-
-            // Normalize YYYY-MM (from <input type="month">) to YYYY-MM-DD
-            // Pydantic's date type rejects partial dates.
-            const toFullDate = (val) => {
-              if (!val) return null
-              const s = String(val).trim()
-              // Already YYYY-MM-DD
-              if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
-              // YYYY-MM → YYYY-MM-01
-              if (/^\d{4}-\d{2}$/.test(s)) return `${s}-01`
-              // Bare year → YYYY-01-01
-              if (/^\d{4}$/.test(s)) return `${s}-01-01`
-              return null
-            }
-
-            await resumeApi.addExperience(
-              rid,
-              {
-                company:
-                  e.employer ||
-                  e.company ||
-                  null,
-
-                job_title:
-                  e.jobTitle ||
-                  e.job_title ||
-                  null,
-
-                location:
-                  e.city ||
-                  e.location ||
-                  null,
-
-                employment_type:
-                  e.employmentType ||
-                  e.employment_type ||
-                  null,
-
-                start_date:
-                  toFullDate(
-                    e.startDate ||
-                    e.start_date
-                  ),
-
-                end_date:
-                  e.currentWork || e.is_current
-                    ? null
-                    : toFullDate(
-                        e.endDate ||
-                        e.end_date
-                      ),
-
-                is_current:
-                  e.currentWork ||
-                  e.is_current ||
-                  false,
-
-                description:
-                  e.description ||
-                  null,
-              }
-            )
+        const rid = resumeId || currentResumeId
+        if (!rid) throw new Error('An active resume is required to save experience.')
+        const assertActive = () => {
+          if (String(activeResumeIdRef.current) !== String(rid)) {
+            throw new Error('The active resume changed while saving experience.')
           }
-
-          return true
-        } catch (err) {
-          console.error(
-            'saveExperiencesToBackend failed:',
-            err
-          )
-
-          return false
         }
+        assertActive()
+        const { data: existing } = await resumeApi.getExperience(rid)
+        const existingById = new Map((existing || []).map((item) => [String(item.id), item]))
+        const retainedIds = new Set()
+        const toFullDate = (val) => {
+          if (!val) return null
+          const value = String(val).trim()
+          if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+          if (/^\d{4}-\d{2}$/.test(value)) return `${value}-01`
+          if (/^\d{4}$/.test(value)) return `${value}-01-01`
+          return null
+        }
+        const toPayload = (entry) => ({
+          company: entry.employer || entry.company || null,
+          job_title: entry.jobTitle || entry.job_title || null,
+          location: entry.city || entry.location || null,
+          employment_type: entry.employmentType || entry.employment_type || null,
+          start_date: toFullDate(entry.startDate || entry.start_date),
+          end_date: entry.currentWork || entry.is_current ? null : toFullDate(entry.endDate || entry.end_date),
+          is_current: Boolean(entry.currentWork || entry.is_current),
+          description: entry.description || null,
+        })
+
+        for (const entry of entries || []) {
+          assertActive()
+          const existingItem = existingById.get(String(entry.id))
+          if (existingItem) {
+            retainedIds.add(String(existingItem.id))
+            await resumeApi.updateExperience(rid, existingItem.id, toPayload(entry))
+          } else {
+            await resumeApi.addExperience(rid, toPayload(entry))
+          }
+        }
+        for (const item of existing || []) {
+          assertActive()
+          if (!retainedIds.has(String(item.id))) {
+            await resumeApi.deleteExperience(rid, item.id)
+          }
+        }
+        assertActive()
+        const { data: saved } = await resumeApi.getExperience(rid)
+        assertActive()
+        setExperiences(normalizeResumeSections({ experience: saved }).experience)
+        return saved || []
       },
-      [currentResumeId]
+      [currentResumeId, setExperiences]
     )
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -913,85 +1194,56 @@ const ensureResumeExists =
         entries,
         resumeId
       ) => {
-        try {
-          const rid =
-            resumeId ||
-            currentResumeId
-
-          if (!rid) return false
-
-          const {
-            data: education,
-          } = await resumeApi.getEducation(
-            rid
-          )
-
-          await Promise.all(
-            (
-              education ||
-              []
-            ).map((e) =>
-              resumeApi.deleteEducation(
-                rid,
-                e.id
-              )
-            )
-          )
-
-          for (
-            let i = 0;
-            i < entries.length;
-            i++
-          ) {
-            const e = entries[i]
-
-            await resumeApi.addEducation(
-              rid,
-              {
-                degree:
-                  e.degree ||
-                  null,
-
-                institution:
-                  e.institution ||
-                  e.schoolName ||
-                  null,
-
-                field_of_study:
-                  e.fieldOfStudy ||
-                  e.field_of_study ||
-                  null,
-
-                start_date:
-                  e.startYear ||
-                  e.startDate ||
-                  e.start_date ||
-                  null,
-
-                end_date:
-                  e.endYear ||
-                  e.endDate ||
-                  e.end_date ||
-                  null,
-
-                description:
-                  e.description ||
-                  null,
-              }
-            )
+        const rid = resumeId || currentResumeId
+        if (!rid) throw new Error('An active resume is required to save education.')
+        const assertActive = () => {
+          if (String(activeResumeIdRef.current) !== String(rid)) {
+            throw new Error('The active resume changed while saving education.')
           }
-
-          return true
-        } catch (err) {
-          console.error(
-            'saveEducationToBackend failed:',
-            err
-          )
-
-          return false
         }
+        assertActive()
+        const { data: existing } = await resumeApi.getEducation(rid)
+        const existingById = new Map((existing || []).map((item) => [String(item.id), item]))
+        const retainedIds = new Set()
+        const toFullDate = (value) => {
+          if (!value || String(value).toLowerCase() === 'present') return null
+          const dateValue = String(value).trim()
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return dateValue
+          if (/^\d{4}-\d{2}$/.test(dateValue)) return `${dateValue}-01`
+          if (/^\d{4}$/.test(dateValue)) return `${dateValue}-01-01`
+          return null
+        }
+        for (const entry of entries || []) {
+          assertActive()
+          const existingItem = existingById.get(String(entry.id))
+          const payload = {
+            institution: entry.institution || entry.schoolName || null,
+            degree: entry.degree || null,
+            field_of_study: entry.fieldOfStudy || entry.field_of_study || null,
+            start_date: toFullDate(entry.startYear || entry.startDate || entry.start_date),
+            end_date: toFullDate(entry.endYear || entry.endDate || entry.end_date),
+            description: entry.description || null,
+          }
+          if (existingItem) {
+            retainedIds.add(String(existingItem.id))
+            await resumeApi.updateEducation(rid, existingItem.id, payload)
+          } else {
+            await resumeApi.addEducation(rid, payload)
+          }
+        }
+        for (const item of existing || []) {
+          assertActive()
+          if (!retainedIds.has(String(item.id))) {
+            await resumeApi.deleteEducation(rid, item.id)
+          }
+        }
+        assertActive()
+        const { data: saved } = await resumeApi.getEducation(rid)
+        assertActive()
+        setEducation(normalizeResumeSections({ education: saved }).education)
+        return saved || []
       },
-      [currentResumeId]
+      [currentResumeId, setEducation]
     )
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -1004,75 +1256,45 @@ const ensureResumeExists =
         skillsList,
         resumeId
       ) => {
-        try {
-          const rid =
-            resumeId ||
-            currentResumeId
-
-          if (!rid) return false
-
-          const {
-            data: skills,
-          } = await resumeApi.getSkills(
-            rid
-          )
-
-          await Promise.all(
-            (
-              skills ||
-              []
-            ).map((s) =>
-              resumeApi.deleteSkill(
-                rid,
-                s.id
-              )
-            )
-          )
-
-          for (
-            let i = 0;
-            i < skillsList.length;
-            i++
-          ) {
-            const s =
-              skillsList[i]
-
-            await resumeApi.addSkill(
-              rid,
-              {
-                name:
-                  typeof s ===
-                  'string'
-                    ? s
-                    : s.name || '',
-
-                category:
-                  typeof s === 'string'
-                    ? null
-                    : s.category ||
-                      null,
-
-                proficiency:
-                  typeof s === 'string'
-                    ? null
-                    : s.proficiency ||
-                      s.level ||
-                      null,
-              }
-            )
+        const rid = resumeId || currentResumeId
+        if (!rid) throw new Error('An active resume is required to save skills.')
+        const assertActive = () => {
+          if (String(activeResumeIdRef.current) !== String(rid)) {
+            throw new Error('The active resume changed while saving skills.')
           }
-
-          return true
-        } catch (err) {
-          console.error(
-            'saveSkillsToBackend failed:',
-            err
-          )
-
-          return false
         }
+        assertActive()
+        const { data: existing } = await resumeApi.getSkills(rid)
+        const existingById = new Map((existing || []).map((item) => [String(item.id), item]))
+        const retainedIds = new Set()
+        for (const skill of skillsList || []) {
+          assertActive()
+          const existingItem = existingById.get(String(skill.id))
+          const payload = {
+            name: typeof skill === 'string' ? skill : skill.name || '',
+            category: typeof skill === 'string' ? null : skill.category || null,
+            proficiency: typeof skill === 'string' ? null : skill.proficiency || skill.level || null,
+          }
+          if (existingItem) {
+            retainedIds.add(String(existingItem.id))
+            await resumeApi.updateSkill(rid, existingItem.id, payload)
+          } else {
+            await resumeApi.addSkill(rid, payload)
+          }
+        }
+        for (const item of existing || []) {
+          assertActive()
+          if (!retainedIds.has(String(item.id))) {
+            await resumeApi.deleteSkill(rid, item.id)
+          }
+        }
+        assertActive()
+        const { data: saved } = await resumeApi.getSkills(rid)
+        assertActive()
+        setSkills(normalizeResumeSections({ skills: saved }).skills)
+        return saved || []
       },
-      [currentResumeId]
+      [currentResumeId, setSkills]
     )
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -1085,107 +1307,116 @@ const ensureResumeExists =
         projectsList,
         resumeId
       ) => {
-        try {
-          const rid =
-            resumeId ||
-            currentResumeId
-
-          if (!rid) return false
-
-          const {
-            data: projects,
-          } = await resumeApi.getProjects(
-            rid
-          )
-
-          await Promise.all(
-            (
-              projects ||
-              []
-            ).map((p) =>
-              resumeApi.deleteProject(
-                rid,
-                p.id
-              )
-            )
-          )
-
-          for (
-            let i = 0;
-            i < projectsList.length;
-            i++
-          ) {
-            const p =
-              projectsList[i]
-
-            // Only send project_url if it looks like a valid URL —
-            // Pydantic HttpUrl validation rejects empty strings and plain text.
-            const rawUrl =
-              p.project_url ||
-              p.projectLink ||
-              p.link ||
-              p.url ||
-              null
-
-            const projectUrl = (() => {
-              if (!rawUrl) return null
-              const s = String(rawUrl).trim()
-              if (!s) return null
-              // Must start with http:// or https://
-              return /^https?:\/\/.+/.test(s) ? s : null
-            })()
-
-            await resumeApi.addProject(
-              rid,
-              {
-                title:
-                  p.title ||
-                  p.name ||
-                  null,
-
-                description:
-                  p.description ||
-                  null,
-
-                role:
-                  p.role ||
-                  null,
-
-                technologies:
-                  p.technologies ||
-                  p.techStack ||
-                  p.tech_stack ||
-                  null,
-
-                project_url: projectUrl,
-
-                start_date:
-                  p.startDate ||
-                  p.start_date ||
-                  null,
-
-                end_date:
-                  p.ongoing
-                    ? null
-                    : p.endDate ||
-                      p.end_date ||
-                      null,
-              }
-            )
+        const rid = resumeId || currentResumeId
+        if (!rid) throw new Error('An active resume is required to save projects.')
+        const assertActive = () => {
+          if (String(activeResumeIdRef.current) !== String(rid)) {
+            throw new Error('The active resume changed while saving projects.')
           }
-
-          return true
-        } catch (err) {
-          console.error(
-            'saveProjectsToBackend failed:',
-            err
-          )
-
-          return false
         }
+        const saved = await reconcileResumeCollection({
+          api: {
+            list: resumeApi.getProjects,
+            create: resumeApi.addProject,
+            update: resumeApi.updateProject,
+            delete: resumeApi.deleteProject,
+          },
+          resumeId: rid,
+          entries: projectsList,
+          assertActive,
+          toPayload: (project) => {
+            const rawUrl = project.project_url || project.projectLink || project.link || project.url || null
+            const projectUrl = rawUrl && /^https?:\/\/.+/.test(String(rawUrl).trim())
+              ? String(rawUrl).trim()
+              : null
+            return {
+              title: project.title || project.name || null,
+              description: project.description || null,
+              role: project.role || null,
+              technologies: project.technologies || project.techStack || project.tech_stack || null,
+              project_url: projectUrl,
+              start_date: project.startDate || project.start_date || null,
+              end_date: project.ongoing ? null : project.endDate || project.end_date || null,
+            }
+          },
+        })
+        setProjects(normalizeResumeSections({ projects: saved }).projects)
+        return saved
       },
-      [currentResumeId]
+      [currentResumeId, setProjects]
     )
+
+  const saveCertificationsToBackend = useCallback(async (entries, resumeId) => {
+    const rid = resumeId || currentResumeId
+    if (!rid) throw new Error('An active resume is required to save certifications.')
+    const assertActive = () => {
+      if (String(activeResumeIdRef.current) !== String(rid)) {
+        throw new Error('The active resume changed while saving certifications.')
+      }
+    }
+    const saved = await reconcileResumeCollection({
+      api: certificationApi,
+      resumeId: rid,
+      entries,
+      assertActive,
+      toPayload: (certification) => ({
+        name: certification.name || '',
+        issuing_organization: certification.issuing_organization || certification.issuer || 'Unknown',
+        issue_date: certification.issue_date || (certification.year ? `${certification.year}-01-01` : null),
+        expiration_date: certification.expiration_date || null,
+        credential_id: certification.credential_id || certification.credentialId || null,
+        credential_url: certification.credential_url || certification.credentialUrl || null,
+      }),
+    })
+    setCertifications(normalizeResumeSections({ certifications: saved }).certifications)
+    return saved
+  }, [currentResumeId, setCertifications])
+
+  const saveLanguagesToBackend = useCallback(async (entries, resumeId) => {
+    const rid = resumeId || currentResumeId
+    if (!rid) throw new Error('An active resume is required to save languages.')
+    const assertActive = () => {
+      if (String(activeResumeIdRef.current) !== String(rid)) {
+        throw new Error('The active resume changed while saving languages.')
+      }
+    }
+    const saved = await reconcileResumeCollection({
+      api: languageApi,
+      resumeId: rid,
+      entries,
+      assertActive,
+      toPayload: (language) => ({
+        name: typeof language === 'string' ? language : language.name || language.language || '',
+        proficiency: typeof language === 'string' ? null : language.proficiency || null,
+      }),
+    })
+    setLanguages(normalizeResumeSections({ languages: saved }).languages)
+    return saved
+  }, [currentResumeId, setLanguages])
+
+  const saveAchievementsToBackend = useCallback(async (entries, resumeId) => {
+    const rid = resumeId || currentResumeId
+    if (!rid) throw new Error('An active resume is required to save achievements.')
+    const assertActive = () => {
+      if (String(activeResumeIdRef.current) !== String(rid)) {
+        throw new Error('The active resume changed while saving achievements.')
+      }
+    }
+    const saved = await reconcileResumeCollection({
+      api: achievementApi,
+      resumeId: rid,
+      entries,
+      assertActive,
+      toPayload: (achievement) => ({
+        title: typeof achievement === 'string' ? achievement : achievement.title || '',
+        description: typeof achievement === 'string' ? null : achievement.description || null,
+        organization: typeof achievement === 'string' ? null : achievement.organization || null,
+        year: typeof achievement === 'string' ? null : achievement.year || null,
+      }),
+    })
+    setAchievements(normalizeResumeSections({ achievements: saved }).achievements)
+    return saved
+  }, [currentResumeId, setAchievements])
 
   /* ─────────────────────────────────────────────────────────────────────────
    * saveResumeMeta
@@ -1371,41 +1602,7 @@ const ensureResumeExists =
             return null
           }
 
-          /*
-           * Fetch complete resume from backend.
-           */
-          const {
-            data,
-          } = await resumeApi.get(
-            resumeId
-          )
-
-          /*
-           * Keep the SAME resume ID.
-           */
-          setCurrentResumeId(
-            resumeId
-          )
-
-          const resumeTemplateId =
-            Number(
-              data?.template_id ??
-              data?.templateId ??
-              1
-            )
-
-          if (
-            Number.isInteger(
-              resumeTemplateId
-            ) &&
-            resumeTemplateId > 0
-          ) {
-            switchTemplate(
-              resumeTemplateId
-            )
-          }
-
-          return data
+          return await loadResume(resumeId)
         } catch (err) {
           console.error(
             'selectResume failed:',
@@ -1416,8 +1613,7 @@ const ensureResumeExists =
         }
       },
       [
-        setCurrentResumeId,
-        switchTemplate,
+        loadResume,
       ]
     )
 
@@ -1453,6 +1649,9 @@ const ensureResumeExists =
             setCurrentResumeId(
               null
             )
+            setCurrentResume(null)
+            hydratedResumeIdRef.current = null
+            loadingResumeIdRef.current = null
 
             /*
              * Reset template when the
@@ -1579,6 +1778,8 @@ const ensureResumeExists =
         /* ignore */
       }
 
+      setCurrentResumeId(null)
+
       setProfileData({
         firstName: '',
         middleName: '',
@@ -1636,6 +1837,7 @@ const ensureResumeExists =
       setSkillsSaved(false)
       setProjectsSaved(false)
       setPortfolioSaved(false)
+      setCurrentResume(null)
 
       /*
        * Reset active template for a fresh resume.
@@ -1658,11 +1860,13 @@ const ensureResumeExists =
       setHobbies,
       setReferences,
       setProfileSaved,
+      setCurrentResumeId,
       setExperienceSaved,
       setEducationSaved,
       setSkillsSaved,
       setProjectsSaved,
       setPortfolioSaved,
+      setCurrentResume,
       switchTemplate,
     ])
 
@@ -1807,12 +2011,16 @@ const ensureResumeExists =
 
         resumesLoading,
         resumesError,
+        resumeLoading,
+        resumeError,
 
         loadResumes,
+        loadResume,
         refreshResumes,
 
         currentResumeId,
         setCurrentResumeId,
+        currentResume,
 
         selectResume,
         addResume,
@@ -1877,6 +2085,9 @@ const ensureResumeExists =
         saveEducationToBackend,
         saveSkillsToBackend,
         saveProjectsToBackend,
+        saveCertificationsToBackend,
+        saveLanguagesToBackend,
+        saveAchievementsToBackend,
         saveResumeMeta,
       }}
     >

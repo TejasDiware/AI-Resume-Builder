@@ -560,20 +560,8 @@ export default function CreateResume() {
 
     const title = basic.fullName.trim() || 'My Resume'
     ctx?.setResumeTitle?.(title)
-    ctx?.addResume?.({
-      id: Date.now(), title, templateId: 1,
-      score: (() => {
-        let s = 0
-        if (basic.fullName) s += 20
-        if (basic.email)    s += 10
-        if (basic.phone)    s += 10
-        if (expEntries.some(e => e.jobTitle)) s += 20
-        if (skills.length > 0) s += 20
-        if (basic.summary)  s += 20
-        return s
-      })(),
-      createdAt: new Date().toLocaleDateString(),
-    })
+    const resumeId = await ctx?.ensureResumeExists?.(title, 1)
+    if (!resumeId) return
 
     setSaved(true)
     setTimeout(() => navigate('/app/templates'), 1000)

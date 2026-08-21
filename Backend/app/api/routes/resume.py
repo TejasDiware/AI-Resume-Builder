@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from app.models.job_description import JobDescription
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -33,9 +34,26 @@ def create_resume(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    existing_resume = db.scalar(
+        select(Resume)
+        .where(
+            Resume.user_id == current_user.id,
+            Resume.template_id == resume_data.template_id,
+            Resume.job_description_id == resume_data.job_description_id,
+        )
+        .order_by(
+            Resume.updated_at.desc(),
+            Resume.id.desc(),
+        )
+    )
+
+    if existing_resume is not None:
+        return existing_resume
+
     resume = Resume(
         user_id=current_user.id,
         title=resume_data.title,
+        job_description_id=resume_data.job_description_id,
         template_id=resume_data.template_id,
         template=resume_data.template,
     )
@@ -133,6 +151,25 @@ def update_resume(
         exclude_unset=True
     )
 
+    # Validate Job Description ownership
+    if "job_description_id" in update_data:
+        job_description_id = update_data["job_description_id"]
+
+        if job_description_id is not None:
+            job_description = db.scalar(
+                select(JobDescription).where(
+                    JobDescription.id == job_description_id,
+                    JobDescription.user_id == current_user.id,
+                )
+            )
+
+            if job_description is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Job description not found",
+                )
+
+    # Apply updates
     for field, value in update_data.items():
         setattr(resume, field, value)
 

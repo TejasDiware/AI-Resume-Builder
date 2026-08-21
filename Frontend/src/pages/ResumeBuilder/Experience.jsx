@@ -80,7 +80,6 @@ const COMPANIES = [
 ]
 
 const emptyEntry = () => ({
-  id:            Date.now(),
   jobTitle:      '',
   employer:      '',
   employerOther: '',
@@ -101,7 +100,7 @@ export default function Experience() {
   const ctx = useResume()
   const {
     experiences: ctxExperiences, setExperiences, setExperienceSaved,
-    ensureResumeExists, saveExperiencesToBackend, resumeTitle,
+    currentResumeId, saveExperiencesToBackend,
   } = ctx
 
   const [entries, setEntries] = useState(() =>
@@ -113,14 +112,16 @@ export default function Experience() {
 
   // Sync when context updates (e.g. after CV import)
   useEffect(() => {
-    if (ctxExperiences?.length) {
-      setEntries(ctxExperiences.map(e => ({ ...emptyEntry(), ...e })))
-    }
+    setEntries(
+      ctxExperiences?.length
+        ? ctxExperiences.map(e => ({ ...emptyEntry(), ...e }))
+        : [emptyEntry()],
+    )
   }, [ctxExperiences])
 
-  const update = (id, field, val) =>
+  const update = (index, field, val) =>
     setEntries(prev => {
-      const next = prev.map(e => e.id === id ? { ...e, [field]: val } : e)
+      const next = prev.map((e, entryIndex) => entryIndex === index ? { ...e, [field]: val } : e)
       try { setExperiences([...next]) } catch (err) { /* ignore if context not ready */ }
       return next
     })
@@ -130,9 +131,9 @@ export default function Experience() {
     try { setExperiences([...next]) } catch (err) {}
     return next
   })
-  const removeEntry = id =>
+  const removeEntry = index =>
     setEntries(prev => {
-      const next = prev.length > 1 ? prev.filter(e => e.id !== id) : prev
+      const next = prev.length > 1 ? prev.filter((_, entryIndex) => entryIndex !== index) : prev
       try { setExperiences([...next]) } catch (err) {}
       return next
     })
@@ -154,28 +155,22 @@ export default function Experience() {
 
     setError('')
     setSaving(true)
-
-    // Always save to localStorage first (offline-safe)
-    setExperiences([...entries])
-
-    // Persist to backend
     try {
-      const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
-      if (rid) {
-        await saveExperiencesToBackend(entries, rid)
-      }
+      const rid = currentResumeId
+      if (!rid) throw new Error('Select or create a resume before saving experience.')
+      await saveExperiencesToBackend(entries, rid)
+      setExperienceSaved(true)
+      setSaved(true)
+      setTimeout(() => {
+        setSaved(false)
+        navigate(`/app/resume-builder/education?template=${templateId}`)
+      }, 800)
     } catch (err) {
       console.error('Backend save failed (experience):', err)
-      // Non-blocking — local save already succeeded
+      setError(err.response?.data?.detail || err.message || 'Unable to save experience.')
+    } finally {
+      setSaving(false)
     }
-
-    setSaving(false)
-    setExperienceSaved(true)
-    setSaved(true)
-    setTimeout(() => {
-      setSaved(false)
-      navigate(`/app/resume-builder/education?template=${templateId}`)
-    }, 800)
   }
 
   return (
@@ -196,7 +191,7 @@ export default function Experience() {
         <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 0, marginBottom: 16 }}>* Required fields</p>
 
         {entries.map((entry, idx) => (
-          <div key={entry.id} style={{
+          <div key={entry.id || `new-${idx}`} style={{
             background: '#fff',
             borderRadius: 16,
             padding: '24px 24px',
@@ -214,7 +209,7 @@ export default function Experience() {
               </p>
               {entries.length > 1 && (
                 <button
-                  onClick={() => removeEntry(entry.id)}
+                  onClick={() => removeEntry(idx)}
                   style={{
                     background: '#fef2f2', border: 'none', cursor: 'pointer',
                     color: '#ef4444', display: 'flex', alignItems: 'center',
@@ -235,7 +230,7 @@ export default function Experience() {
                   type="text"
                   value={entry.jobTitle}
                   placeholder="e.g. Software Engineer"
-                  onChange={e => update(entry.id, 'jobTitle', e.target.value)}
+                  onChange={e => update(idx, 'jobTitle', e.target.value)}
                   onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                   onBlur={e => (e.target.style.borderColor = '#d1d5db')}
                 />
@@ -250,10 +245,10 @@ export default function Experience() {
                     const val = e.target.value
                     if (val !== '__other__') {
                       // Known company selected — fill employer directly
-                      update(entry.id, 'employer', val)
+                      update(idx, 'employer', val)
                     } else {
                       // "Other" selected — blank out so the text input appears empty
-                      update(entry.id, 'employer', '')
+                      update(idx, 'employer', '')
                     }
                   }}
                   onFocus={e => (e.target.style.borderColor = '#4f46e5')}
@@ -273,7 +268,7 @@ export default function Experience() {
                     style={{ ...inputStyle, marginTop: 8 }}
                     value={entry.employer}
                     placeholder="Enter company name"
-                    onChange={e => update(entry.id, 'employer', e.target.value)}
+                    onChange={e => update(idx, 'employer', e.target.value)}
                     onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                     onBlur={e => (e.target.style.borderColor = '#d1d5db')}
                   />
@@ -288,12 +283,12 @@ export default function Experience() {
                 label="Start Date"
                 required
                 value={entry.startDate}
-                onChange={val => update(entry.id, 'startDate', val)}
+                onChange={val => update(idx, 'startDate', val)}
               />
               <DateField
                 label="End Date"
                 value={entry.currentWork ? '' : entry.endDate}
-                onChange={val => update(entry.id, 'endDate', val)}
+                onChange={val => update(idx, 'endDate', val)}
                 disabled={entry.currentWork}
               />
             </div>
@@ -308,9 +303,9 @@ export default function Experience() {
               }}>
                 <input
                   type="checkbox"
-                  id={`current-${entry.id}`}
+                  id={`current-${entry.id || idx}`}
                   checked={entry.currentWork}
-                  onChange={e => update(entry.id, 'currentWork', e.target.checked)}
+                  onChange={e => update(idx, 'currentWork', e.target.checked)}
                   style={{ width: 15, height: 15, accentColor: '#4f46e5', cursor: 'pointer', flexShrink: 0 }}
                 />
                 I currently work here
@@ -323,7 +318,7 @@ export default function Experience() {
                 style={{ ...inputStyle, resize: 'vertical', minHeight: 90, lineHeight: 1.6 }}
                 value={entry.description}
                 placeholder="Describe your role and key responsibilities..."
-                onChange={e => update(entry.id, 'description', e.target.value)}
+                onChange={e => update(idx, 'description', e.target.value)}
                 onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                 onBlur={e => (e.target.style.borderColor = '#d1d5db')}
               />

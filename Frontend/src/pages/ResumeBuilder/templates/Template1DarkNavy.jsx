@@ -63,13 +63,8 @@ export default function Template1DarkNavy({ sidebarColor = '#1a2332', accentColo
     { degree: 'Bachelor of Computer Applications (BCA)', institution: 'College / University', startYear: 'Year', endYear: '', cgpa: 'Percentage / CGPA' },
   ]
   const certifications = ctx?.certifications?.length ? ctx.certifications : ['Certification Name – Issuing Organization', 'Certification Name – Issuing Organization']
-  const websites = ctx?.websites || {}
-  const links = [
-    ['Website', websites.other],
-    ['LinkedIn', websites.linkedin],
-    ['GitHub', websites.github],
-    ['Portfolio', websites.portfolio],
-  ].filter(([, value]) => value)
+ 
+  .filter(([, value]) => value)
   const mainRef = useRef(null)
   const [pageHeight, setPageHeight] = useState(A4_HEIGHT)
 
@@ -111,13 +106,7 @@ export default function Template1DarkNavy({ sidebarColor = '#1a2332', accentColo
           </div>
         </SidebarSection>
 
-        <SidebarSection title="WEBSITE & PORTFOLIO" accentColor={accentColor}>
-          <div style={{ display: 'grid', gap: 6, fontSize: '9.5pt', fontWeight: 400, lineHeight: 1.7, color: 'rgba(255,255,255,0.9)' }}>
-            {(links.length ? links : [['Website', ''], ['LinkedIn', ''], ['GitHub', ''], ['Portfolio', '']]).map(([label, value]) => (
-              <div key={label}>⌁&nbsp; {value ? value.replace(/^https?:\/\//, '') : label}</div>
-            ))}
-          </div>
-        </SidebarSection>
+        
 
         <SidebarSection title="SKILLS" accentColor={accentColor}>
           <div style={{ display: 'grid', gap: 2, color: 'rgba(255,255,255,0.9)' }}>

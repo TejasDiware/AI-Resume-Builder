@@ -3,6 +3,7 @@ import html
 import re
 
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import (
     ParagraphStyle,
@@ -203,6 +204,7 @@ def generate_resume_pdf(
         fontSize=template_config["title_size"],
         leading=25,
         alignment=title_alignment,
+        textColor=colors.HexColor(template_config["accent_color"]),
         spaceBefore=0,
         spaceAfter=2,
     )
@@ -233,6 +235,7 @@ def generate_resume_pdf(
         fontName=template_config["bold_font_name"],
         fontSize=template_config["heading_size"],
         leading=14,
+        textColor=colors.HexColor(template_config["accent_color"]),
         spaceBefore=8,
         spaceAfter=3,
         keepWithNext=True,
@@ -311,6 +314,7 @@ def generate_resume_pdf(
                 HRFlowable(
                     width="100%",
                     thickness=0.7,
+                    color=colors.HexColor(template_config["accent_color"]),
                     spaceBefore=0,
                     spaceAfter=5,
                 )

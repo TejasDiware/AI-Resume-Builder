@@ -39,7 +39,6 @@ function Field({ label, required, children }) {
 }
 
 const emptyEntry = () => ({
-  id:          Date.now() + Math.random(),
   institution: '',
   degree:      '',
   startYear:   '',
@@ -54,15 +53,17 @@ export default function Education() {
   const templateId = params.get('template') || '1'
 
   const { education: ctxEducation, setEducation, setEducationSaved,
-          ensureResumeExists, saveEducationToBackend, resumeTitle } = useResume()
+          currentResumeId, saveEducationToBackend } = useResume()
 
   const mapCtx = (e) => ({
-    id:          Date.now() + Math.random(),
+    id:          e.id,
     institution: e.institution || e.schoolName || '',
-    degree:      [e.degree, e.fieldStudy].filter(Boolean).join(' – ') || '',
+    degree:      e.degree || '',
+    fieldStudy:  e.fieldStudy || e.fieldOfStudy || '',
     startYear:   e.startYear  || e.startDate  || '',
     endYear:     e.endYear    || e.endDate    || '',
     cgpa:        e.cgpa       || e.score      || '',
+    description: e.description || '',
   })
 
   const [entries, setEntries] = useState(() =>
@@ -74,12 +75,12 @@ export default function Education() {
 
   // Sync on CV import
   useEffect(() => {
-    if (!ctxEducation?.length) return
-
     // Do not replace locally edited entries when this page writes the same
     // values back to context. Replacing them recreates each input and steals
     // its focus after every keystroke.
     setEntries(currentEntries => {
+      if (!ctxEducation?.length) return [emptyEntry()]
+
       const incomingEntries = ctxEducation.map(mapCtx)
       const unchanged = currentEntries.length === incomingEntries.length && currentEntries.every((entry, index) => {
         const incoming = incomingEntries[index]
@@ -94,20 +95,22 @@ export default function Education() {
     })
   }, [ctxEducation])
 
-  const update = (id, field, val) =>
+  const update = (index, field, val) =>
     setEntries(prev => {
-      const next = prev.map(e => e.id === id ? { ...e, [field]: val } : e)
+      const next = prev.map((e, entryIndex) => entryIndex === index ? { ...e, [field]: val } : e)
       try {
         const mapped = next.map(e => ({
+          id:           e.id,
           institution: e.institution,
           degree:      e.degree,
           startYear:   e.startYear,
           endYear:     e.endYear,
           cgpa:        e.cgpa,
           schoolName:  e.institution,
-          fieldStudy:  '',
+          fieldStudy:  e.fieldStudy || '',
           city:        '',
           state:       '',
+          description: e.description || '',
         }))
         setEducation(mapped)
       } catch (err) {}
@@ -115,20 +118,22 @@ export default function Education() {
     })
 
   const addEntry    = () => setEntries(prev => [...prev, emptyEntry()])
-  const removeEntry = (id) =>
+  const removeEntry = (index) =>
     setEntries(prev => {
-      const next = prev.length > 1 ? prev.filter(e => e.id !== id) : prev
+      const next = prev.length > 1 ? prev.filter((_, entryIndex) => entryIndex !== index) : prev
       try {
         const mapped = next.map(e => ({
+          id:           e.id,
           institution: e.institution,
           degree:      e.degree,
           startYear:   e.startYear,
           endYear:     e.endYear,
           cgpa:        e.cgpa,
           schoolName:  e.institution,
-          fieldStudy:  '',
+          fieldStudy:  e.fieldStudy || '',
           city:        '',
           state:       '',
+          description: e.description || '',
         }))
         setEducation(mapped)
       } catch (err) {}
@@ -154,66 +159,22 @@ export default function Education() {
 
     setError('')
     setSaving(true)
-
-    const mapped = entries.map(e => ({
-      institution: e.institution,
-      degree:      e.degree,
-      startYear:   e.startYear,
-      endYear:     e.endYear,
-      cgpa:        e.cgpa,
-      schoolName:  e.institution,
-      fieldStudy:  '',
-      city:        '',
-      state:       '',
-    }))
-
-    // Always save to localStorage first (offline-safe)
-    setEducation(mapped)
-
-    // Persist to backend
-    // EducationCreate: institution, degree, field_of_study, start_date, end_date, description
-    // cgpa and year strings must be converted to date strings (YYYY-MM-DD) or null
     try {
-      const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
-      if (rid) {
-        // Build backend-compatible payload for each entry
-        const backendEntries = entries.map(e => {
-          // Convert "2020", "2020-2024", "Present" etc. to YYYY-MM-DD or null
-          const toDate = (val) => {
-            if (!val || val.toString().toLowerCase() === 'present') return null
-            const year = val.toString().match(/\d{4}/)?.[0]
-            return year ? `${year}-01-01` : null
-          }
-
-          // degree field holds "B.Tech in Computer Science" — put whole string as degree
-          // field_of_study: extract after "in " if present, else null
-          const degreeStr = e.degree || ''
-          const inIdx = degreeStr.toLowerCase().indexOf(' in ')
-          const degree      = inIdx > -1 ? degreeStr.slice(0, inIdx).trim() : degreeStr
-          const fieldOfStudy = inIdx > -1 ? degreeStr.slice(inIdx + 4).trim() : null
-
-          return {
-            institution:    e.institution,
-            degree:         degree || degreeStr,
-            field_of_study: fieldOfStudy || null,
-            start_date:     toDate(e.startYear),
-            end_date:       toDate(e.endYear),
-            description:    e.cgpa ? `CGPA/Score: ${e.cgpa}` : null,
-          }
-        })
-        await saveEducationToBackend(backendEntries, rid)
-      }
+      const rid = currentResumeId
+      if (!rid) throw new Error('Select or create a resume before saving education.')
+      await saveEducationToBackend(entries, rid)
+      setEducationSaved(true)
+      setSaved(true)
+      setTimeout(() => {
+        setSaved(false)
+        navigate(`/app/resume-builder/skills?template=${templateId}`)
+      }, 800)
     } catch (err) {
       console.error('Backend save failed (education):', err)
+      setError(err.response?.data?.detail || err.message || 'Unable to save education.')
+    } finally {
+      setSaving(false)
     }
-
-    setSaving(false)
-    setEducationSaved(true)
-    setSaved(true)
-    setTimeout(() => {
-      setSaved(false)
-      navigate(`/app/resume-builder/skills?template=${templateId}`)
-    }, 800)
   }
 
   return (
@@ -232,7 +193,7 @@ export default function Education() {
         <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 0, marginBottom: 16 }}>* Required fields</p>
 
         {entries.map((entry, idx) => (
-          <div key={entry.id} style={{
+          <div key={entry.id || `new-${idx}`} style={{
             background: '#fff', borderRadius: 16,
             padding: '24px', boxShadow: '0 1px 6px rgba(0,0,0,0.07)',
             marginBottom: 20,
@@ -245,7 +206,7 @@ export default function Education() {
               </p>
               {entries.length > 1 && (
                 <button
-                  onClick={() => removeEntry(entry.id)}
+                  onClick={() => removeEntry(idx)}
                   style={{
                     background: '#fef2f2', border: 'none', cursor: 'pointer',
                     color: '#ef4444', display: 'flex', alignItems: 'center',
@@ -265,7 +226,7 @@ export default function Education() {
                 type="text"
                 value={entry.institution}
                 placeholder="e.g. XYZ University"
-                onChange={e => update(entry.id, 'institution', e.target.value)}
+                onChange={e => update(idx, 'institution', e.target.value)}
                 onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                 onBlur={e => (e.target.style.borderColor = '#d1d5db')}
               />
@@ -278,7 +239,7 @@ export default function Education() {
                 type="text"
                 value={entry.degree}
                 placeholder="e.g. B.Tech in Computer Science"
-                onChange={e => update(entry.id, 'degree', e.target.value)}
+                onChange={e => update(idx, 'degree', e.target.value)}
                 onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                 onBlur={e => (e.target.style.borderColor = '#d1d5db')}
               />
@@ -295,7 +256,7 @@ export default function Education() {
                   type="text"
                   value={entry.startYear}
                   placeholder="e.g. 2020"
-                  onChange={e => update(entry.id, 'startYear', e.target.value)}
+                  onChange={e => update(idx, 'startYear', e.target.value)}
                   onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                   onBlur={e => (e.target.style.borderColor = '#d1d5db')}
                 />
@@ -309,7 +270,7 @@ export default function Education() {
                   type="text"
                   value={entry.endYear}
                   placeholder="e.g. 2024 or Present"
-                  onChange={e => update(entry.id, 'endYear', e.target.value)}
+                  onChange={e => update(idx, 'endYear', e.target.value)}
                   onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                   onBlur={e => (e.target.style.borderColor = '#d1d5db')}
                 />
@@ -323,7 +284,7 @@ export default function Education() {
                 type="text"
                 value={entry.cgpa}
                 placeholder="e.g. 8.5 / 10 or 85%"
-                onChange={e => update(entry.id, 'cgpa', e.target.value)}
+                onChange={e => update(idx, 'cgpa', e.target.value)}
                 onFocus={e => (e.target.style.borderColor = '#4f46e5')}
                 onBlur={e => (e.target.style.borderColor = '#d1d5db')}
               />

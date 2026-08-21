@@ -608,8 +608,8 @@ class AIService:
             languages=[
                 (
                     f"{item['name']} "
-                    f"({item['proficiency']})"
-                    if item["proficiency"]
+                    f"({item.get('proficiency', '')})"
+                    if item.get("proficiency")
                     else item["name"]
                 )
                 for item in generation_context[
@@ -1145,6 +1145,136 @@ class AIService:
         )
 
 
+    def _normalize_tailoring_text(self, value: str | None) -> str:
+        if value is None:
+            return ""
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(value).casefold())).strip()
+
+    def _has_supported_jd_match(self, generation_context: dict, jd_analysis: dict | None) -> bool:
+        if not jd_analysis:
+            return False
+
+        resume_skills = {
+            self._normalize_tailoring_text(str(item))
+            for item in generation_context.get("skills", [])
+            if isinstance(item, str) and item.strip()
+        }
+
+        required_skills = [
+            str(item)
+            for item in jd_analysis.get("required_skills", [])
+            if isinstance(item, str) and item.strip()
+        ]
+        if any(self._normalize_tailoring_text(skill) in resume_skills for skill in required_skills):
+            return True
+
+        preferred_skills = [
+            str(item)
+            for item in jd_analysis.get("preferred_skills", [])
+            if isinstance(item, str) and item.strip()
+        ]
+        if any(self._normalize_tailoring_text(skill) in resume_skills for skill in preferred_skills):
+            return True
+
+        target_keywords = [
+            str(item).strip()
+            for item in jd_analysis.get("keywords", [])
+            if isinstance(item, str) and item.strip()
+        ]
+        if not target_keywords:
+            return False
+
+        resume_text = json.dumps(generation_context, ensure_ascii=False).casefold()
+        return any(keyword.casefold() in resume_text for keyword in target_keywords)
+
+    def _is_effectively_unchanged_tailoring(
+        self,
+        original: str | None,
+        updated: str | None,
+    ) -> bool:
+        if original is None and updated is None:
+            return True
+        if original is None or updated is None:
+            return False
+        return self._normalize_tailoring_text(original) == self._normalize_tailoring_text(updated)
+
+    def _is_weak_tailored_result(
+        self,
+        tailored: GeneratedTailoredContent,
+        generation_context: dict,
+        jd_analysis: dict | None,
+    ) -> bool:
+        if not self._has_supported_jd_match(generation_context, jd_analysis):
+            return False
+
+        current_summary = (generation_context.get("profile", {}).get("summary", "") or "").strip()
+        if tailored.summary and self._is_effectively_unchanged_tailoring(current_summary, tailored.summary):
+            return True
+
+        experience_map = {
+            str(item.get("id")): item
+            for item in generation_context.get("experience", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        project_map = {
+            str(item.get("id")): item
+            for item in generation_context.get("projects", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+
+        for entry in tailored.experience:
+            original = experience_map.get(str(entry.id))
+            if original is None:
+                continue
+            original_description = (original.get("description") or "").strip()
+            if original_description and self._is_effectively_unchanged_tailoring(original_description, entry.description):
+                return True
+
+        for entry in tailored.projects:
+            original = project_map.get(str(entry.id))
+            if original is None:
+                continue
+            original_description = (original.get("description") or "").strip()
+            if original_description and self._is_effectively_unchanged_tailoring(original_description, entry.description):
+                return True
+
+        return False
+
+    def _tailoring_signal_score(
+        self,
+        tailored: GeneratedTailoredContent,
+        generation_context: dict,
+        jd_analysis: dict | None,
+    ) -> int:
+        score = 0
+        current_summary = (generation_context.get("profile", {}).get("summary", "") or "").strip()
+        if tailored.summary and not self._is_effectively_unchanged_tailoring(current_summary, tailored.summary):
+            score += 2
+
+        experience_map = {
+            str(item.get("id")): item
+            for item in generation_context.get("experience", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        for entry in tailored.experience:
+            original = experience_map.get(str(entry.id))
+            original_description = (original.get("description") or "").strip() if original else ""
+            if original_description and not self._is_effectively_unchanged_tailoring(original_description, entry.description):
+                score += 1
+
+        project_map = {
+            str(item.get("id")): item
+            for item in generation_context.get("projects", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        for entry in tailored.projects:
+            original = project_map.get(str(entry.id))
+            original_description = (original.get("description") or "").strip() if original else ""
+            if original_description and not self._is_effectively_unchanged_tailoring(original_description, entry.description):
+                score += 1
+
+        return score + len(tailored.matched_skills) + len(tailored.matched_keywords)
+
     def generate_tailored_resume(
         self,
         resume_id: int,
@@ -1152,301 +1282,258 @@ class AIService:
         generation_context: dict,
         job_description: str,
         instruction: str | None,
+        jd_analysis: dict | None = None,
     ) -> TailoredResumeResponse:
 
-        import json
-
-        prompt = STRUCTURED_TAILORED_RESUME_PROMPT.format(
-            profile=json.dumps(
-                generation_context["profile"],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            experience=json.dumps(
-                generation_context["experience"],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            projects=json.dumps(
-                generation_context["projects"],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            job_description=job_description,
-            instruction=instruction or "",
-        )
-
-        raw_response = self.provider.generate(prompt)
-
-        try:
-            data = parse_json_response(raw_response)
-
-            tailored = GeneratedTailoredContent.model_validate(
-                data
+        def build_prompt(extra_instruction: str | None = None) -> str:
+            merged_instruction = instruction or ""
+            if extra_instruction:
+                merged_instruction = f"{merged_instruction}\n\n{extra_instruction}".strip()
+            return STRUCTURED_TAILORED_RESUME_PROMPT.format(
+                profile=json.dumps(generation_context["profile"], ensure_ascii=False, indent=2),
+                experience=json.dumps(generation_context["experience"], ensure_ascii=False, indent=2),
+                projects=json.dumps(generation_context["projects"], ensure_ascii=False, indent=2),
+                education=json.dumps(generation_context["education"], ensure_ascii=False, indent=2),
+                skills=json.dumps(generation_context["skills"], ensure_ascii=False, indent=2),
+                certifications=json.dumps(generation_context["certifications"], ensure_ascii=False, indent=2),
+                languages=json.dumps(generation_context["languages"], ensure_ascii=False, indent=2),
+                achievements=json.dumps(generation_context["achievements"], ensure_ascii=False, indent=2),
+                job_description=job_description,
+                jd_analysis=json.dumps(jd_analysis or {}, ensure_ascii=False, indent=2),
+                instruction=merged_instruction,
             )
 
-        except ValueError as exc:
-            raise RuntimeError(
-                "AI returned invalid structured tailored resume content"
-            ) from exc
+        def build_response(data: dict) -> TailoredResumeResponse:
+            tailored = GeneratedTailoredContent.model_validate(data)
 
-        # ---------------------------------------------------------
-        # Existing resume records
-        # ---------------------------------------------------------
+            experience_map = {item["id"]: item for item in generation_context["experience"]}
+            project_map = {item["id"]: item for item in generation_context["projects"]}
 
-        experience_map = {
-            item["id"]: item
-            for item in generation_context["experience"]
-        }
+            updated_experience = {
+                item.id: item.description.strip()
+                for item in tailored.experience
+                if item.id in experience_map and item.description.strip()
+            }
+            updated_projects = {
+                item.id: item.description.strip()
+                for item in tailored.projects
+                if item.id in project_map and item.description.strip()
+            }
 
-        project_map = {
-            item["id"]: item
-            for item in generation_context["projects"]
-        }
+            resume_skills = [item for item in generation_context["skills"] if isinstance(item, str) and item.strip()]
+            resume_skill_lookup = {
+                self._normalize_tailoring_text(item): item
+                for item in resume_skills
+            }
 
-        # ---------------------------------------------------------
-        # AI-generated experience updates
-        # ---------------------------------------------------------
+            required_skills = [
+                str(item)
+                for item in (jd_analysis or {}).get("required_skills", [])
+                if isinstance(item, str) and item.strip()
+            ]
+            matched_skills = [
+                resume_skill_lookup[self._normalize_tailoring_text(skill)]
+                for skill in required_skills
+                if self._normalize_tailoring_text(skill) in resume_skill_lookup
+            ]
+            missing_skills = [
+                skill
+                for skill in required_skills
+                if self._normalize_tailoring_text(skill) not in resume_skill_lookup
+            ]
 
-        updated_experience = {
-            item.id: item.description.strip()
-            for item in tailored.experience
-            if item.id in experience_map
-            and item.description.strip()
-        }
+            preferred_skills = [
+                str(item)
+                for item in (jd_analysis or {}).get("preferred_skills", [])
+                if isinstance(item, str) and item.strip()
+            ]
+            missing_skills.extend(
+                skill
+                for skill in preferred_skills
+                if self._normalize_tailoring_text(skill) not in resume_skill_lookup
+            )
 
-        # ---------------------------------------------------------
-        # AI-generated project updates
-        # ---------------------------------------------------------
+            ai_missing_skills = [
+                str(item).strip()
+                for item in getattr(tailored, "missing_skills", [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if ai_missing_skills:
+                missing_skills = [
+                    skill
+                    for skill in ai_missing_skills
+                    if self._normalize_tailoring_text(skill) not in {
+                        self._normalize_tailoring_text(item)
+                        for item in resume_skills
+                    }
+                ]
 
-        updated_projects = {
-            item.id: item.description.strip()
-            for item in tailored.projects
-            if item.id in project_map
-            and item.description.strip()
-        }
+            target_keywords = [
+                item for item in (jd_analysis or {}).get("keywords", [])
+                if isinstance(item, str) and item.strip()
+            ]
+            resume_text = json.dumps(generation_context, ensure_ascii=False).casefold()
+            matched_keywords = [item for item in target_keywords if item.casefold() in resume_text]
+            ai_missing_keywords = [
+                str(item).strip()
+                for item in getattr(tailored, "missing_keywords", [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if ai_missing_keywords:
+                missing_keywords = list(dict.fromkeys(ai_missing_keywords))
+            else:
+                missing_keywords = [item for item in target_keywords if item.casefold() not in resume_text]
 
-        # ---------------------------------------------------------
-        # Build formatted experience records
-        # ---------------------------------------------------------
-
-        experience_records = []
-
-        for item in generation_context["experience"]:
-            experience_records.append(
-                {
+            experience_records = []
+            for item in generation_context["experience"]:
+                experience_records.append({
                     **item,
-                    "description": updated_experience.get(
-                        item["id"],
-                        item["description"],
-                    ),
-                }
-            )
+                    "original_description": item.get("description", "") or "",
+                    "description": updated_experience.get(item["id"], item["description"]),
+                })
 
-        # ---------------------------------------------------------
-        # Build formatted project records
-        # ---------------------------------------------------------
-
-        project_records = []
-
-        for item in generation_context["projects"]:
-            project_records.append(
-                {
+            project_records = []
+            for item in generation_context["projects"]:
+                project_records.append({
                     **item,
-                    "description": updated_projects.get(
-                        item["id"],
-                        item["description"],
-                    ),
-                }
-            )
+                    "original_description": item.get("description", "") or "",
+                    "description": updated_projects.get(item["id"], item["description"]),
+                })
 
-        # ---------------------------------------------------------
-        # Summary
-        # ---------------------------------------------------------
+            current_summary = (generation_context["profile"].get("summary", "") or "").strip()
+            summary = tailored.summary.strip() if tailored.summary.strip() else current_summary
 
-        current_summary = (
-            generation_context["profile"].get(
-                "summary",
-                "",
-            )
-            or ""
-        ).strip()
-
-        summary = (
-            tailored.summary.strip()
-            if tailored.summary.strip()
-            else current_summary
-        )
-
-        # ---------------------------------------------------------
-        # Build reviewable AI changes
-        #
-        # IMPORTANT:
-        # Nothing is saved here.
-        #
-        # These are proposals only.
-        # The frontend will display them to the user.
-        # ---------------------------------------------------------
-
-        changes: list[AIChange] = []
-
-        # =========================================================
-        # SUMMARY CHANGE
-        # =========================================================
-
-        if summary and summary != current_summary:
-            changes.append(
-                AIChange(
-                    id=(
-                        f"tailored_summary_"
-                        f"{resume_id}_"
-                        f"{job_description_id}"
-                    ),
+            changes: list[AIChange] = []
+            if summary and summary != current_summary:
+                changes.append(AIChange(
+                    id=f"tailored_summary_{resume_id}_{job_description_id}",
                     action="update",
                     section="summary",
                     target_id=None,
                     old_content=current_summary,
                     new_content=summary,
-                    reason=(
-                        "AI tailored the resume summary to better "
-                        "match the selected job description."
-                    ),
-                )
-            )
+                    reason="AI tailored the resume summary to better match the selected job description.",
+                ))
 
-        # =========================================================
-        # EXPERIENCE CHANGES
-        # =========================================================
-
-        for experience_id, new_description in (
-            updated_experience.items()
-        ):
-            original = experience_map[experience_id]
-
-            old_description = (
-                original.get(
-                    "description",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if new_description == old_description:
-                continue
-
-            changes.append(
-                AIChange(
-                    id=(
-                        f"tailored_experience_"
-                        f"{experience_id}_"
-                        f"{job_description_id}"
-                    ),
+            for experience_id, new_description in updated_experience.items():
+                original = experience_map[experience_id]
+                old_description = (original.get("description", "") or "").strip()
+                if new_description == old_description:
+                    continue
+                changes.append(AIChange(
+                    id=f"tailored_experience_{experience_id}_{job_description_id}",
                     action="update",
                     section="experience",
                     target_id=experience_id,
                     old_content=old_description,
                     new_content=new_description,
-                    reason=(
-                        "AI tailored the service history to emphasize "
-                        "experience relevant to the selected job description."
-                    ),
-                )
-            )
+                    reason="AI tailored the service history to emphasize experience relevant to the selected job description.",
+                ))
 
-        # =========================================================
-        # PROJECT CHANGES
-        # =========================================================
-
-        for project_id, new_description in (
-            updated_projects.items()
-        ):
-            original = project_map[project_id]
-
-            old_description = (
-                original.get(
-                    "description",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if new_description == old_description:
-                continue
-
-            changes.append(
-                AIChange(
-                    id=(
-                        f"tailored_project_"
-                        f"{project_id}_"
-                        f"{job_description_id}"
-                    ),
+            for project_id, new_description in updated_projects.items():
+                original = project_map[project_id]
+                old_description = (original.get("description", "") or "").strip()
+                if new_description == old_description:
+                    continue
+                changes.append(AIChange(
+                    id=f"tailored_project_{project_id}_{job_description_id}",
                     action="update",
                     section="project",
                     target_id=project_id,
                     old_content=old_description,
                     new_content=new_description,
-                    reason=(
-                        "AI tailored the project description to better "
-                        "align with the selected job description."
-                    ),
-                )
-            )
+                    reason="AI tailored the project description to better align with the selected job description.",
+                ))
 
-        # ---------------------------------------------------------
-        # Format final preview
-        # ---------------------------------------------------------
-
-        content = format_resume_text(
-            profile=generation_context["profile"],
-            summary=summary,
-            education=generation_context["education"],
-            experience=experience_records,
-            skills=generation_context["skills"],
-            projects=project_records,
-            certifications=generation_context[
-                "certifications"
-            ],
-            languages=[
-                (
-                    f"{item['name']} "
-                    f"({item['proficiency']})"
-                    if item["proficiency"]
-                    else item["name"]
-                )
-                for item in generation_context["languages"]
-            ],
-            achievements=[
-                item["description"]
-                for item in generation_context["achievements"]
-                if item["description"]
-            ],
-        )
-
-        if not content.strip():
-            raise RuntimeError(
-                "Generated tailored resume content is empty"
-            )
-
-        return TailoredResumeResponse(
-            resume_id=resume_id,
-            job_description_id=job_description_id,
-            content=content,
-            structured=TailoredResumeContent(
+            content = format_resume_text(
+                profile=generation_context["profile"],
                 summary=summary,
+                education=generation_context["education"],
+                experience=experience_records,
                 skills=generation_context["skills"],
-                experience=[
-                    item["description"]
-                    for item in experience_records
-                    if item["description"]
+                projects=project_records,
+                certifications=generation_context["certifications"],
+                languages=[
+                    f"{item['name']} ({item.get('proficiency', '')})" if item.get("proficiency") else item["name"]
+                    for item in generation_context["languages"]
                 ],
-                projects=[
-                    item["description"]
-                    for item in project_records
-                    if item["description"]
-                ],
-            ),
-            changes=changes,
-        )
+                achievements=[item["description"] for item in generation_context["achievements"] if item["description"]],
+            )
+
+            if not content.strip():
+                raise RuntimeError("Generated tailored resume content is empty")
+
+            recommendations = [item.strip() for item in tailored.recommendations if isinstance(item, str) and item.strip()]
+            if not recommendations:
+                recommendations = [
+                    "Review the proposed wording changes and apply only the updates that accurately represent your experience."
+                ]
+
+            return TailoredResumeResponse(
+                resume_id=resume_id,
+                job_description_id=job_description_id,
+                content=content,
+                structured=TailoredResumeContent(
+                    summary=summary,
+                    profile=generation_context["profile"],
+                    skills=resume_skills,
+                    education=generation_context["education"],
+                    experience=[
+                        {
+                            "experience_id": item["id"],
+                            "company": item.get("company", ""),
+                            "job_title": item.get("job_title", ""),
+                            "original_description": item.get("original_description", item.get("description", "")) or "",
+                            "tailored_description": item.get("description", "") or "",
+                        }
+                        for item in experience_records
+                        if item["description"]
+                    ],
+                    projects=[
+                        {
+                            "project_id": item["id"],
+                            "title": item.get("title", ""),
+                            "original_description": item.get("original_description", item.get("description", "")) or "",
+                            "tailored_description": item.get("description", "") or "",
+                            "technologies": item.get("technologies", "") or "",
+                        }
+                        for item in project_records
+                        if item["description"]
+                    ],
+                    certifications=generation_context["certifications"],
+                    languages=generation_context["languages"],
+                    achievements=generation_context["achievements"],
+                    relevant_existing_skills=list(dict.fromkeys(matched_skills)),
+                    matched_skills=list(dict.fromkeys(matched_skills)),
+                    missing_skills=list(dict.fromkeys(missing_skills)),
+                    matched_keywords=list(dict.fromkeys(matched_keywords)),
+                    missing_keywords=list(dict.fromkeys(missing_keywords)),
+                    recommendations=recommendations,
+                ),
+                changes=changes,
+                job_description_analysis=jd_analysis or {},
+            )
+
+        def parse_generated_payload(raw_response: str):
+            data = parse_json_response(raw_response)
+            return GeneratedTailoredContent.model_validate(data), data
+
+        prompt = build_prompt()
+        initial_tailored, initial_data = parse_generated_payload(self.provider.generate(prompt))
+        result = build_response(initial_data)
+
+        if self._is_weak_tailored_result(initial_tailored, generation_context, jd_analysis):
+            retry_instruction = (
+                "The previous result did not sufficiently tailor the resume to the target job description. "
+                "Re-evaluate the candidate's existing facts and rewrite the summary, relevant experience descriptions, "
+                "and relevant project descriptions to prioritize supported JD-aligned skills and terminology. "
+                "Do not invent any missing skills."
+            )
+            retry_tailored, retry_data = parse_generated_payload(self.provider.generate(build_prompt(retry_instruction)))
+            retry_result = build_response(retry_data)
+            if self._tailoring_signal_score(retry_tailored, generation_context, jd_analysis) >= self._tailoring_signal_score(initial_tailored, generation_context, jd_analysis):
+                return retry_result
+        return result
 
 
 

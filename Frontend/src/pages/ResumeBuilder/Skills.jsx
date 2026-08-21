@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { MdClose, MdAdd, MdKeyboardArrowDown, MdInfoOutline } from 'react-icons/md'
 import { useResume } from '../../context/ResumeContext'
@@ -55,50 +55,69 @@ export default function Skills() {
   const templateId = params.get('template') || '1'
 
   const { skills: ctxSkills, setSkills: setContextSkills, setSkillsSaved,
-          ensureResumeExists, saveSkillsToBackend, resumeTitle } = useResume()
+      currentResumeId, saveSkillsToBackend } = useResume()
 
-  const [selectedRole, setSelectedRole] = useState(() => ctxSkills?.length ? 'Others' : '')
+    const toSkillObject = (skill) => typeof skill === 'string'
+      ? { name: skill, category: '', proficiency: '' }
+      : { ...skill, name: skill.name || '', category: skill.category || '', proficiency: skill.proficiency || '' }
+
+    const [selectedRole, setSelectedRole] = useState(() => ctxSkills?.length ? 'Others' : '')
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [keySkills, setKeySkills]       = useState(() => ctxSkills?.length ? [...ctxSkills] : [])
+    const [keySkills, setKeySkills]       = useState(() => (ctxSkills || []).map(toSkillObject))
   const [editing, setEditing]           = useState(false)
   const [inputVal, setInputVal]         = useState('')
   const [customInput, setCustomInput]   = useState('')
   const [saved,  setSaved]  = useState(false)
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
+  const syncingFromContextRef = useRef(false)
 
   const isOthers = selectedRole === 'Others'
+
+  useEffect(() => {
+    const incoming = (ctxSkills || []).map(toSkillObject)
+    syncingFromContextRef.current = true
+    setKeySkills(incoming)
+    if (!incoming.length) setSelectedRole('')
+    else if (!selectedRole) setSelectedRole('Others')
+  }, [ctxSkills])
+
+  useEffect(() => {
+    if (syncingFromContextRef.current) {
+      syncingFromContextRef.current = false
+      return
+    }
+    const isSame = ctxSkills?.length === keySkills.length && ctxSkills.every((skill, idx) => {
+      const current = toSkillObject(skill)
+      const next = keySkills[idx]
+      return current.id === next.id && current.name === next.name &&
+        current.category === next.category && current.proficiency === next.proficiency
+    })
+    if (!isSame) setContextSkills(keySkills.map(toSkillObject))
+  }, [ctxSkills, keySkills, setContextSkills])
 
   const handleRoleSelect = (role) => {
     setSelectedRole(role)
     setDropdownOpen(false)
-    setKeySkills(role !== 'Others' ? roleSkillsMap[role] : [])
+    setKeySkills(role !== 'Others' ? roleSkillsMap[role].map(name => toSkillObject(name)) : [])
     setEditing(false)
     setInputVal('')
     setCustomInput('')
   }
 
-  const removeSkill = skill => setKeySkills(prev => prev.filter(s => s !== skill))
+  const removeSkill = index => setKeySkills(prev => prev.filter((_, skillIndex) => skillIndex !== index))
 
   const addSkill = () => {
     const t = inputVal.trim()
-    if (t && !keySkills.includes(t)) setKeySkills(prev => [...prev, t])
+    if (t && !keySkills.some(skill => skill.name === t)) setKeySkills(prev => [...prev, toSkillObject(t)])
     setInputVal('')
   }
 
   const addCustomSkill = () => {
     const t = customInput.trim()
-    if (t && !keySkills.includes(t)) setKeySkills(prev => [...prev, t])
+    if (t && !keySkills.some(skill => skill.name === t)) setKeySkills(prev => [...prev, toSkillObject(t)])
     setCustomInput('')
   }
-
-  // persist skills to context as user edits so navigating back shows them
-  useEffect(() => {
-    const isSame = ctxSkills?.length === keySkills.length && ctxSkills?.every((skill, idx) => skill === keySkills[idx])
-    if (!isSame) {
-      setContextSkills([...keySkills])
-    }
-  }, [ctxSkills, keySkills, setContextSkills])
 
   const handleSave = async () => {
     if (!keySkills || keySkills.length === 0) {
@@ -108,24 +127,19 @@ export default function Skills() {
 
     setError('')
     setSaving(true)
-
-    // Always save to localStorage first (offline-safe)
-    setContextSkills([...keySkills])
-
-    // Persist to backend
     try {
-      const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
-      if (rid) {
-        await saveSkillsToBackend(keySkills, rid)
-      }
+      const rid = currentResumeId
+      if (!rid) throw new Error('Select or create a resume before saving skills.')
+      await saveSkillsToBackend(keySkills, rid)
+      setSkillsSaved(true)
+      setSaved(true)
+      safeNavigate(navigate, `/app/resume-builder/projects?template=${templateId}`, { replace: true })
     } catch (err) {
       console.error('Backend save failed (skills):', err)
+      setError(err.response?.data?.detail || err.message || 'Unable to save skills.')
+    } finally {
+      setSaving(false)
     }
-
-    setSaving(false)
-    setSkillsSaved(true)
-    setSaved(true)
-    safeNavigate(navigate, `/app/resume-builder/projects?template=${templateId}`, { replace: true })
   }
 
   return (
@@ -266,16 +280,16 @@ export default function Skills() {
                     {isOthers ? 'Type your skills above to add them here.' : 'No skills added yet.'}
                   </p>
                 )}
-                {keySkills.map(skill => (
-                  <span key={skill} style={{
+                {keySkills.map((skill, index) => (
+                  <span key={skill.id || `new-${index}`} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5,
                     background: '#eef2ff', color: '#4f46e5',
                     borderRadius: 999, padding: '5px 12px',
                     fontSize: '0.78rem', fontWeight: 600,
                   }}>
-                    {skill}
+                    {skill.name}
                     <button
-                      onClick={() => removeSkill(skill)}
+                      onClick={() => removeSkill(index)}
                       style={{
                         background: 'none', border: 'none', padding: 0,
                         cursor: 'pointer', color: '#818cf8',

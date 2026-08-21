@@ -24,6 +24,8 @@ import Profile from './pages/Profile/Profile'
 import ChangePassword from './pages/ChangePassword/ChangePassword'
 import MyProfile from './pages/MyProfile/MyProfile'
 import ATSChecker from './pages/ATS/ATSCheckerChat'
+import JobDescriptions from './pages/JobDescriptions/JobDescriptions'
+import ResumeQuality from './pages/Quality/ResumeQuality'
 
 // Resume builder sections
 import Skills from './pages/ResumeBuilder/Skills'
@@ -31,11 +33,11 @@ import Experience from './pages/ResumeBuilder/Experience'
 import Education from './pages/ResumeBuilder/Education'
 import Company from './pages/ResumeBuilder/Company'
 import Summary from './pages/ResumeBuilder/Summary'
-import Portfolio from './pages/ResumeBuilder/Portfolio'
 import Projects from './pages/ResumeBuilder/Projects'
 import Preview from './pages/ResumeBuilder/Preview'
 import Certifications from './pages/ResumeBuilder/Certifications'
 import AIAssistant from './pages/AI/AIAssistant'
+import ResumePdfRenderPage from './pages/Internal/ResumePdfRenderPage'
 
 import './App.css'
 
@@ -142,6 +144,16 @@ function AppLayout() {
             />
 
             <Route
+              path="job-descriptions"
+              element={<JobDescriptions />}
+            />
+
+            <Route
+              path="resume-quality"
+              element={<ResumeQuality />}
+            />
+
+            <Route
               path="profile"
               element={<Profile />}
             />
@@ -178,10 +190,7 @@ function AppLayout() {
                 element={<Projects />}
               />
 
-              <Route
-                path="resume-builder/portfolio"
-                element={<Portfolio />}
-              />
+              
 
               <Route
                 path="resume-builder/summary"
@@ -252,6 +261,11 @@ export default function App() {
             <Route
               path="/signup"
               element={<Signup />}
+            />
+
+            <Route
+              path="/internal/resume-pdf/:resumeId"
+              element={<ResumePdfRenderPage />}
             />
 
             {/* Protected app routes */}

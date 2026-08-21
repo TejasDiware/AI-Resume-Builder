@@ -1,28 +1,28 @@
 import staticData from '../../../data/resumeData'
 
 export function buildResumeData(ctx) {
+  const isDemo = !ctx
   const p          = ctx?.profileData
-  const hasProfile = p && (p.firstName || p.lastName || p.email)
 
-  const name     = hasProfile
-    ? `${p.firstName || ''} ${p.middleName || ''} ${p.lastName || ''}`.replace(/\s+/g, ' ').trim()
-    : staticData.name
+  const name     = isDemo
+    ? staticData.name
+    : `${p?.firstName || ''} ${p?.middleName || ''} ${p?.lastName || ''}`.replace(/\s+/g, ' ').trim()
 
-  const title    = hasProfile ? (p.profession || staticData.title) : staticData.title
-  const email    = hasProfile ? (p.email  || '') : staticData.contact.email
-  const phone    = hasProfile ? (p.phone  || '') : staticData.contact.phone
-  const dob      = hasProfile ? (p.dob || '') : ''
-  const location = hasProfile
-    ? [p.city, p.state, p.nationality].filter(Boolean).join(', ')
-    : staticData.contact.location
+  const title    = isDemo ? staticData.title : (p?.profession || '')
+  const email    = isDemo ? staticData.contact.email : (p?.email || '')
+  const phone    = isDemo ? staticData.contact.phone : (p?.phone || '')
+  const dob      = isDemo ? '' : (p?.dob || '')
+  const location = isDemo
+    ? staticData.contact.location
+    : [p?.city, p?.state, p?.nationality].filter(Boolean).join(', ')
 
-  const rawExp    = ctx?.experiences?.length > 0 ? ctx.experiences : staticData.experience
-  const rawSkills = ctx?.skills?.length > 0      ? ctx.skills      : staticData.skills
+  const rawExp    = isDemo ? staticData.experience : (ctx.experiences || [])
+  const rawSkills = isDemo ? staticData.skills : (ctx.skills || [])
   const profileLanguages = (p?.languages || []).map(language => typeof language === 'string' ? language : language.language).filter(Boolean)
-  const summary   = ctx?.summary                 ? ctx.summary     : staticData.profile
-  const rawEdu    = ctx?.education?.length > 0   ? ctx.education   : staticData.education
-  const websites  = ctx?.websites || {}
-  const projects  = ctx?.projects?.length > 0    ? ctx.projects    : staticData.projects
+  const summary   = isDemo ? staticData.profile : (ctx.summary || '')
+  const rawEdu    = isDemo ? staticData.education : (ctx.education || [])
+  const websites  = isDemo ? staticData.contact : (ctx.websites || {})
+  const projects  = isDemo ? staticData.projects : (ctx.projects || [])
 
   // photo — use uploaded photo from context, fallback to null
   const photo = p?.photo || null
@@ -47,14 +47,14 @@ export function buildResumeData(ctx) {
     skills:         rawSkills,
     expList,
     photo,
-    linkedin:       websites.linkedin || staticData.contact.linkedin,
-    github:         websites.github   || staticData.contact.github,
+    linkedin:       websites.linkedin || '',
+    github:         websites.github   || '',
     education:      rawEdu,
     projects,
-    certifications: staticData.certifications,
-    tools:          staticData.tools,
-    languages:      profileLanguages.length ? profileLanguages : staticData.languages,
-    softSkills:     staticData.softSkills,
-    references:     staticData.references,
+    certifications: isDemo ? staticData.certifications : (ctx.certifications || []),
+    tools:          isDemo ? staticData.tools : [],
+    languages:      isDemo ? staticData.languages : profileLanguages,
+    softSkills:     isDemo ? staticData.softSkills : [],
+    references:     isDemo ? staticData.references : (ctx.references || []),
   }
 }

@@ -390,7 +390,7 @@ export default function Summary() {
           <button
             onClick={() =>
               navigate(
-                `/app/resume-builder/portfolio?template=${templateId}`
+                `/app/resume-builder/preview?template=${templateId}`
               )
             }
             style={{

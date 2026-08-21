@@ -40,6 +40,17 @@ class Resume(Base):
         index=True,
     )
 
+    # Optional Job Description associated with this resume.
+    # NULL means this is a general/non-tailored resume.
+    job_description_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "job_descriptions.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
     # ==========================================================
     # Resume Metadata
     # ==========================================================
@@ -106,6 +117,9 @@ class Resume(Base):
     user = relationship(
         "User",
         back_populates="resumes",
+    )
+    job_description = relationship(
+        "JobDescription",
     )
 
     # ==========================================================

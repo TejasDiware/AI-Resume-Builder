@@ -159,6 +159,7 @@ export default function Templates() {
             titleFromUrl ||
             context?.resumeTitle ||
             'Untitled Resume',
+          template_id: templateId,
           template: 'classic',
         })
 
@@ -188,6 +189,7 @@ export default function Templates() {
        */
       context?.setCurrentResumeId?.(resumeId)
       context?.switchTemplate?.(templateId)
+      await context?.loadResume?.(resumeId)
       await context?.refreshResumes?.()
 
       /*

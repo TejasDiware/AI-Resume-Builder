@@ -651,11 +651,21 @@ Additional instruction:
 STRUCTURED_TAILORED_RESUME_PROMPT = """
 You are a professional resume editor and ATS optimization assistant.
 
-You are NOT creating a new resume from scratch.
+Your job is to produce a review-stage tailored resume that prioritizes the
+candidate's real strengths for the target job description. The candidate's
+existing resume is the only source of truth.
 
-You are ONLY improving and prioritizing the wording of the candidate's
-existing summary, experience descriptions, and project descriptions for
-the target job description.
+CRITICAL TAILORING OBJECTIVE:
+
+- Compare the candidate's actual resume facts against the job description.
+- Identify the strongest supported matches in required skills, preferred skills,
+  job keywords, relevant experience, and relevant projects.
+- Rewrite the summary, relevant experience descriptions, and relevant project
+  descriptions to emphasize those supported facts first.
+- De-emphasize weakly relevant information only when that is appropriate.
+- Never change a fact that is not supported by the resume.
+- Never claim skills, responsibilities, tools, or technologies that are not in
+  the candidate's supplied resume context.
 
 STRICT FACTUALITY RULES:
 
@@ -677,17 +687,52 @@ STRICT FACTUALITY RULES:
 - Never change education institutions.
 - Never change skill names.
 - Never create a project role that is not supplied.
-- Never claim that the candidate performed a responsibility
-  merely because it is mentioned in the job description.
+- Never claim that the candidate performed a responsibility merely because it is
+  mentioned in the job description.
 - Never add a job-description skill as if the candidate already had it.
 - Never transform a job requirement into candidate experience.
 - Never add a technology because it is common for the target role.
-- Only emphasize terminology from the job description when it accurately
-  matches facts already present in the candidate resume.
+- Only emphasize terminology from the job description when it accurately matches
+  facts already present in the candidate resume.
 - Preserve the original meaning of every description.
-- Use stronger action verbs only when the resulting statement remains
-  factually equivalent.
-- The application will assemble the final tailored resume itself.
+- Use stronger action verbs only when the resulting statement remains factually
+  equivalent.
+- Prioritize relevant existing skills, experience, and projects.
+- Identify required or preferred skills absent from the resume in missing_skills.
+  Never add them to the resume skills.
+- Return recommendations that explain what changed and why.
+- Return complete applicable tailored resume data, including unchanged sections
+  through the supplied context where applicable.
+
+REAL TAILORING REQUIREMENTS:
+
+- The AI must explicitly compare original content versus tailored content before
+  returning the final JSON.
+- If the original content is already strongly aligned with the target JD, it may
+  remain unchanged.
+- If the original content contains relevant but under-prioritized facts for the
+  target role, rewrite it so those supported JD-aligned facts become more
+  prominent.
+- Do not merely swap a few words or keep the text nearly identical to the
+  original when stronger, more relevant JD-focused wording is available.
+- When the target role is Java backend, Spring Boot, REST APIs, SQL, PostgreSQL,
+  Docker, JPA, etc., emphasize those supported skills and technologies only if
+  they already exist in the candidate resume.
+- If the target JD includes a skill that the candidate does not have, leave it in
+  missing_skills and do not claim it in the summary, experience, or project text.
+- The tailored resume should be meaningfully relevant to the job, not a generic
+  rewording of the original resume.
+- Relevance is more important than grammar.
+
+COMPARE ORIGINAL VS TAILORED TEXT:
+
+For every summary, experience description, and project description:
+- If the original content is genuinely already optimal for the JD, it may stay.
+- If there is a legitimate JD-relevant improvement available from existing facts,
+  rewrite it to prioritize those facts.
+- Never make a change just to look different.
+- Never return content that is effectively identical to the original when there
+  are supported JD-aligned facts that should be more prominent.
 
 Return ONLY valid JSON with this structure:
 
@@ -704,7 +749,13 @@ Return ONLY valid JSON with this structure:
       "id": 0,
       "description": ""
     }}
-  ]
+  ],
+  "relevant_existing_skills": [],
+  "matched_skills": [],
+  "missing_skills": [],
+  "matched_keywords": [],
+  "missing_keywords": [],
+  "recommendations": []
 }}
 
 ID RULES:
@@ -714,29 +765,52 @@ ID RULES:
 - Never change an ID.
 - Preserve every existing experience and project.
 - Only modify description text.
-- Do not modify names, dates, job titles, technologies, or other
-  factual fields.
+- Do not modify names, dates, job titles, technologies, or other factual fields.
 
 TARGETING RULES:
 
-- Prefer content relevant to the target job.
+- Prioritize required skills supported by the candidate.
+- Then prioritize preferred skills supported by the candidate.
+- Then prioritize JD keywords supported by the candidate.
+- Then prioritize relevant candidate experience and projects.
+- Do not add unsupported requirements.
 - Do not remove true facts simply because they are less relevant.
 - Do not add claims merely to improve ATS score.
-- If a job requirement is missing from the candidate resume,
-  leave it missing.
+- If a job requirement is missing from the candidate resume, leave it missing.
 - Do not tell the candidate they performed something they did not perform.
+- Matched skills must come from the supplied resume skills.
+- Missing skills must never be copied into the tailored skills list.
+- Keep the summary concise, factual, and relevant to the target JD.
 
 Candidate Profile:
 {profile}
 
+Education:
+{education}
+
 Experience:
 {experience}
+
+Skills:
+{skills}
 
 Projects:
 {projects}
 
+Certifications:
+{certifications}
+
+Languages:
+{languages}
+
+Achievements:
+{achievements}
+
 Target Job Description:
 {job_description}
+
+Structured Job Description Analysis:
+{jd_analysis}
 
 Additional instruction:
 {instruction}

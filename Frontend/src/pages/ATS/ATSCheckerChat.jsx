@@ -10,8 +10,6 @@ import {
   FaFileWord,
   FaFileImage,
   FaFileAlt,
-  FaPaperclip,
-  FaPaperPlane,
 } from 'react-icons/fa'
 import {
   MdCheckCircle,
@@ -408,6 +406,8 @@ export default function ATSCheckerChat() {
     setSkillsSaved,
     setSummary,
     setWebsites,
+    currentResumeId,
+    loadResume,
   } = useResume()
   const navigate = useNavigate()
 
@@ -440,18 +440,39 @@ export default function ATSCheckerChat() {
   const [dragOver, setDragOver]       = useState(false)
 
   /* ── job description ── */
-  const [jobDesc, setJobDesc]         = useState('')
-  const [jdRows, setJdRows]           = useState(4)
   const [jdId, setJdId]               = useState(null)
+  const [jobDescriptions, setJobDescriptions] = useState([])
+  const [selectedJdId, setSelectedJdId] = useState('')
+  const [jdLoading, setJdLoading] = useState(true)
+  const [jdError, setJdError] = useState('')
+  const activeResumeIdRef = useRef(null)
 
   /* ── analyzing ── */
   const [analyzing, setAnalyzing]     = useState(false)
   const [improving, setImproving]     = useState(false)
 
+  useEffect(() => {
+    activeResumeIdRef.current = currentResumeId ? String(currentResumeId) : null
+    if (checkResumeId && String(checkResumeId) !== String(currentResumeId)) {
+      setCheckResumeId(null)
+      setJdId(null)
+      setStep(STEP.RESUME)
+      setAnalyzing(false)
+      setImproving(false)
+    }
+  }, [currentResumeId])
+
+  useEffect(() => {
+    jobDescriptionApi.list()
+      .then(({ data }) => setJobDescriptions(Array.isArray(data) ? data : []))
+      .catch((err) => setJdError(err.response?.data?.detail || 'Could not load saved Job Descriptions.'))
+      .finally(() => setJdLoading(false))
+  }, [])
+
   /* ── refs ── */
   const fileRef     = useRef()
   const bottomRef   = useRef()
-  const textareaRef = useRef()
+  const messageIdRef = useRef(3)
 
   /* ── auto-scroll to bottom on new messages ── */
   useEffect(() => {
@@ -460,7 +481,7 @@ export default function ATSCheckerChat() {
 
   /* ── helpers ── */
   function addMessage(msg) {
-    setMessages((prev) => [...prev, { id: Date.now() + Math.random(), ...msg }])
+    setMessages((prev) => [...prev, { id: messageIdRef.current++, ...msg }])
   }
 
   /* ============================================================
@@ -488,6 +509,7 @@ export default function ATSCheckerChat() {
       const title = file.name.replace(/\.[^.]+$/, '') || 'ATS Resume'
       const { data: created } = await resumeApi.create({
         title,
+        template_id: 1,
         template: 'classic',
       })
       const resumeId = created?.id
@@ -499,7 +521,8 @@ export default function ATSCheckerChat() {
       await resumeApi.upload(resumeId, file)
 
       setResumeText(text)
-      setCheckResumeId(resumeId)
+      await selectResume?.(resumeId)
+      setCheckResumeId(String(resumeId))
       addResume?.({
         id: resumeId,
         title,
@@ -522,7 +545,7 @@ export default function ATSCheckerChat() {
         addMessage({
           from: 'bot',
           type: 'text',
-          text: `Got it! I've read and saved your resume (${text.length.toLocaleString()} characters). Now paste the job description you want to match against.`,
+          text: `Got it! I've read and saved your resume (${text.length.toLocaleString()} characters). Select a saved Job Description to continue.`,
         })
         setStep(STEP.JD)
       }, 400)
@@ -547,13 +570,13 @@ export default function ATSCheckerChat() {
   /* ============================================================
      SEND JOB DESCRIPTION
   ============================================================ */
-  const handleSendJD = async () => {
-    const jd = jobDesc.trim()
-    if (!jd || step !== STEP.JD) return
+  const handleAnalyzeJD = async () => {
+    if (step !== STEP.JD) return
+    if (!selectedJdId) {
+      addMessage({ from: 'bot', type: 'error', text: 'Select a saved Job Description before analyzing your resume.' })
+      return
+    }
 
-    /* User bubble */
-    addMessage({ from: 'user', type: 'jd', text: jd })
-    setJobDesc('')
     setStep(STEP.ANALYZING)
     setAnalyzing(true)
 
@@ -562,22 +585,22 @@ export default function ATSCheckerChat() {
 
     try {
       /* ── 1. Resolve resume ID ── */
-      if (!checkResumeId) {
+      const operationResumeId = activeResumeIdRef.current
+      if (!operationResumeId || String(checkResumeId) !== operationResumeId) {
         throw new Error('Please upload your resume again before analyzing it.')
       }
 
-      /* ── 2. Create Job Description ── */
-      const { data: jobDescription } = await jobDescriptionApi.create({
-        title: 'ATS Check', company: '', description: jd,
-      })
-      if (!jobDescription?.id) throw new Error('Job description ID was not returned by the server.')
+      /* ── 2. Confirm the selected server-side Job Description ── */
+      const { data: jobDescription } = await jobDescriptionApi.get(selectedJdId)
+      if (!jobDescription?.id) throw new Error('The selected Job Description could not be loaded.')
       setJdId(jobDescription.id)
 
       /* ── 3. Analyze JD with AI ── */
       await aiApi.analyzeJobDescription(jobDescription.id)
 
       /* ── 4. ATS Score ── */
-      const { data: scoreData } = await atsApi.score(checkResumeId, jobDescription.id)
+      const { data: scoreData } = await atsApi.score(operationResumeId, jobDescription.id)
+      if (activeResumeIdRef.current !== operationResumeId) throw new Error('The active resume changed during analysis. Please run the check again.')
       const normalized = normalizeBackendResult(scoreData)
       if (!normalized) throw new Error('No ATS score was returned by the server.')
 
@@ -606,35 +629,26 @@ export default function ATSCheckerChat() {
   ============================================================ */
   const handleReset = () => {
     clearFile()
-    setJobDesc('')
     setStep(STEP.RESUME)
     setAnalyzing(false)
     setImproving(false)
     setJdId(null)
+    setSelectedJdId('')
     setMessages([
       { id: 1, from: 'bot', type: 'text', text: "Hi! I'm your ATS checker. Upload your resume (PDF, DOCX, TXT, or image) and I'll analyse how well it matches a job description." },
       { id: 2, from: 'bot', type: 'upload-prompt', text: 'Start by uploading your resume below.' },
     ])
   }
 
-  /* ============================================================
-     KEYBOARD — send on Enter (Shift+Enter = newline)
-  ============================================================ */
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSendJD()
-    }
-  }
-
   const handleImproveResume = async () => {
-    if (!checkResumeId || !jdId || improving) return
+    const operationResumeId = activeResumeIdRef.current
+    if (!operationResumeId || String(checkResumeId) !== operationResumeId || !jdId || improving) return
 
     setImproving(true)
     addMessage({ from: 'bot', type: 'typing', id: 'typing' })
 
     try {
-      const { data: optimization } = await atsApi.optimize(checkResumeId, jdId)
+      const { data: optimization } = await atsApi.optimize(operationResumeId, jdId)
       const changes = Array.isArray(optimization?.changes) ? optimization.changes : []
 
       if (!changes.length) {
@@ -655,9 +669,12 @@ export default function ATSCheckerChat() {
           request.content = change.new_content
         }
 
-        await aiApi.applyChange(checkResumeId, request)
+        await aiApi.applyChange(operationResumeId, request)
         if (change.reason) appliedReasons.push(change.reason)
       }
+
+      if (activeResumeIdRef.current !== operationResumeId) throw new Error('The active resume changed during optimization. Please run the check again.')
+      await loadResume(operationResumeId)
 
       setMessages((prev) => prev.filter((m) => m.id !== 'typing'))
       addMessage({
@@ -898,41 +915,26 @@ export default function ATSCheckerChat() {
           </div>
         )}
 
-        {/* ── JD STEP: textarea + send button ── */}
+        {/* ── JD STEP: saved Job Description selector ── */}
         {step === STEP.JD && (
           <div className="chat-input-bar__jd">
-            <div className="chat-input-bar__attach" title="Attach a file instead" onClick={() => fileRef.current?.click()}>
-              <FaPaperclip size={16} />
-              <input
-                ref={fileRef} type="file"
-                accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.webp,.bmp"
-                style={{ display: 'none' }}
-                onChange={handleInputChange}
-              />
-            </div>
-            <textarea
-              ref={textareaRef}
-              className="chat-textarea"
-              rows={jdRows}
-              placeholder="Paste the job description here… (Enter to send, Shift+Enter for new line)"
-              value={jobDesc}
-              onChange={(e) => {
-                setJobDesc(e.target.value)
-                /* auto-grow rows */
-                const lines = e.target.value.split('\n').length
-                setJdRows(Math.min(Math.max(lines, 3), 8))
-              }}
-              onKeyDown={handleKeyDown}
-            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', fontSize: '0.85rem', color: '#374151', fontWeight: 600 }}>
+              Job Description
+              <select className="chat-textarea" value={selectedJdId} onChange={(event) => setSelectedJdId(event.target.value)} disabled={jdLoading || !currentResumeId || !jobDescriptions.length}>
+                <option value="">{jdLoading ? 'Loading saved Job Descriptions...' : !jobDescriptions.length ? 'No saved Job Descriptions' : 'Select a saved Job Description'}</option>
+                {jobDescriptions.map((item) => <option key={item.id} value={item.id}>{item.title} (ID: {item.id})</option>)}
+              </select>
+            </label>
             <button
               type="button"
-              className={`chat-send-btn${!jobDesc.trim() ? ' chat-send-btn--disabled' : ''}`}
-              onClick={handleSendJD}
-              disabled={!jobDesc.trim()}
-              aria-label="Send"
+              className={`chat-send-btn${!selectedJdId || !currentResumeId ? ' chat-send-btn--disabled' : ''}`}
+              onClick={handleAnalyzeJD}
+              disabled={!selectedJdId || !currentResumeId || jdLoading}
+              aria-label="Analyze selected Job Description"
             >
-              <FaPaperPlane size={16} />
+              <MdOutlineAnalytics size={16} />
             </button>
+            {jdError && <span style={{ color: '#dc2626', fontSize: '0.75rem' }}>{jdError}</span>}
           </div>
         )}
 

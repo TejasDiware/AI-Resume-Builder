@@ -6,7 +6,6 @@ const sections = [
   { label: 'Education',            path: '/app/resume-builder/education' },
   { label: 'Skills',               path: '/app/resume-builder/skills' },
   { label: 'Projects',             path: '/app/resume-builder/projects' },
-  { label: 'Websites & Portfolio', path: '/app/resume-builder/portfolio' },
   { label: 'Certifications',       path: '/app/resume-builder/certifications' },
   { label: 'Summary',              path: '/app/resume-builder/summary' },
 ]

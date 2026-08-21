@@ -525,12 +525,66 @@ def generate_tailored_resume(
             )
         )
 
+        existing_analysis = db.scalar(
+            select(JobDescriptionAnalysis).where(
+                JobDescriptionAnalysis.job_description_id
+                == job_description.id
+            )
+        )
+
+        if existing_analysis is None:
+            analysis = ai_service.analyze_job_description(
+                title=job_description.title,
+                company=job_description.company,
+                description=job_description.description,
+            )
+            existing_analysis = JobDescriptionAnalysis(
+                job_description_id=job_description.id,
+                job_title=analysis.job_title,
+                required_skills=json.dumps(
+                    analysis.required_skills
+                ),
+                preferred_skills=json.dumps(
+                    analysis.preferred_skills
+                ),
+                experience_requirements=json.dumps(
+                    analysis.experience_requirements
+                ),
+                education_requirements=json.dumps(
+                    analysis.education_requirements
+                ),
+                keywords=json.dumps(analysis.keywords),
+            )
+            db.add(existing_analysis)
+            db.commit()
+            db.refresh(existing_analysis)
+
+        jd_analysis = {
+            "job_title": existing_analysis.job_title,
+            "required_skills": json.loads(
+                existing_analysis.required_skills or "[]"
+            ),
+            "preferred_skills": json.loads(
+                existing_analysis.preferred_skills or "[]"
+            ),
+            "experience_requirements": json.loads(
+                existing_analysis.experience_requirements or "[]"
+            ),
+            "education_requirements": json.loads(
+                existing_analysis.education_requirements or "[]"
+            ),
+            "keywords": json.loads(
+                existing_analysis.keywords or "[]"
+            ),
+        }
+
         return ai_service.generate_tailored_resume(
             resume_id=resume.id,
             job_description_id=job_description.id,
             generation_context=generation_context,
             job_description=job_description.description,
             instruction=request.instruction,
+            jd_analysis=jd_analysis,
         )
 
     except ValueError as exc:

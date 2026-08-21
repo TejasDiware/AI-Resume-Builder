@@ -153,6 +153,68 @@ def test_apply_tailored_resume_requires_existing_resume(
     )
 
 
+def test_apply_tailored_resume_updates_only_approved_fields(
+    client,
+    db_session,
+):
+    token = register_and_login(
+        client,
+        "tailored-approved-fields@example.com",
+    )
+
+    resume = create_resume(
+        client,
+        token,
+        "Tailored Approved Fields Resume",
+    )
+
+    profile_response = client.post(
+        "/api/v1/profile",
+        headers=auth_headers(token),
+        json={
+            "first_name": "Tejas",
+            "last_name": "Diware",
+            "phone": "+919876543210",
+            "professional_title": "Backend Developer",
+            "summary": "Original summary.",
+            "location": "Pune, India",
+        },
+    )
+    assert profile_response.status_code == 201
+
+    experience = Experience(
+        resume_id=resume["id"],
+        company="ABC Technologies",
+        job_title="Backend Developer",
+        description="Original experience.",
+        location="Pune",
+        employment_type="Full-time",
+        is_current=False,
+    )
+    db_session.add(experience)
+    db_session.commit()
+    db_session.refresh(experience)
+
+    response = client.post(
+        f"/api/v1/ai/apply-tailored-resume/{resume['id']}",
+        headers=auth_headers(token),
+        json={
+            "summary": "Approved summary.",
+            "skill_ids": [],
+            "experience_updates": {
+                experience.id: "Approved experience."
+            },
+            "project_updates": {},
+        },
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(experience)
+    profile = db_session.scalar(select(CandidateProfile))
+    assert profile.summary == "Approved summary."
+    assert experience.description == "Approved experience."
+
+
 def test_apply_ai_change_summary_updates_database(
     client,
     db_session,

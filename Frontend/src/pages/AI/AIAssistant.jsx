@@ -19,6 +19,7 @@ import {
   resumeApi,
   jobDescriptionApi,
 } from '../../utils/api'
+import { useResume } from '../../context/ResumeContext'
 
 /* ============================================================
    TOOL CONFIG — matches the AI Resume Assistant dashboard grid
@@ -142,6 +143,14 @@ const ghostBtn = {
   cursor: 'pointer',
 }
 
+const pageShell = {
+  width: '100%',
+  maxWidth: 1200,
+  margin: '0 auto',
+  padding: '24px 24px 32px',
+  boxSizing: 'border-box',
+}
+
 function Field({ children }) {
   return <div style={{ marginBottom: 16 }}>{children}</div>
 }
@@ -208,7 +217,7 @@ function ResultPanel({ title, children }) {
   )
 }
 
-/* Resume selector — upload only (no dropdown) */
+/* Resume selector for existing records, with optional upload. */
 function ResumeSelect({ resumes, value, onChange, onUploaded }) {
   const fileInputRef = useRef(null)
   const [uploading, setUploading] = useState(false)
@@ -225,7 +234,7 @@ function ResumeSelect({ resumes, value, onChange, onUploaded }) {
     setUploading(true)
     try {
       const title = file.name.replace(/\.[^.]+$/, '') || 'Uploaded Resume'
-      const { data: created } = await resumeApi.create({ title, template: 'classic' })
+      const { data: created } = await resumeApi.create({ title, template_id: 1, template: 'classic' })
       await resumeApi.upload(created.id, file)
       onUploaded?.(created)
       onChange(String(created.id))
@@ -240,6 +249,14 @@ function ResumeSelect({ resumes, value, onChange, onUploaded }) {
     <Field>
       <label style={label}>Resume</label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <select style={{ ...inputStyle, flex: 1 }} value={value || ''} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Select a resume</option>
+          {resumes.map((resume) => (
+            <option key={resume.id} value={resume.id}>
+              {resume.title} (#{resume.id})
+            </option>
+          ))}
+        </select>
         <label
           style={{
             ...ghostBtn, display: 'flex', alignItems: 'center', gap: 6,
@@ -272,7 +289,7 @@ function ResumeSelect({ resumes, value, onChange, onUploaded }) {
   )
 }
 
-function JobDescriptionSelect({ list, value, onChange }) {
+function JobDescriptionSelect({ list, value, onChange, error }) {
   return (
     <Field>
       <label style={label}>Job Description</label>
@@ -284,6 +301,8 @@ function JobDescriptionSelect({ list, value, onChange }) {
           </option>
         ))}
       </select>
+      {error && <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: '#b91c1c' }}>{error}</p>}
+      {!error && list.length === 0 && <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: '#64748b' }}>No job descriptions found.</p>}
     </Field>
   )
 }
@@ -447,8 +466,9 @@ function ImproveSummaryTool() {
    TOOL: Improve Experience
 ============================================================ */
 function ImproveExperienceTool() {
-  const [resumes, setResumes] = useState([])
-  const [resumeId, setResumeId] = useState('')
+  const { currentResumeId, savedResumes, selectResume, loadResume } = useResume()
+  const resumeId = currentResumeId ? String(currentResumeId) : ''
+  const resumes = savedResumes || []
   const [experiences, setExperiences] = useState([])
   const [experienceId, setExperienceId] = useState('')
   const [instruction, setInstruction] = useState('')
@@ -459,20 +479,21 @@ function ImproveExperienceTool() {
   const [applied, setApplied] = useState(false)
 
   useEffect(() => {
-    resumeApi.list().then(({ data }) => setResumes(data || [])).catch(() => setResumes([]))
-  }, [])
-
-  useEffect(() => {
     setExperienceId('')
     if (!resumeId) { setExperiences([]); return }
-    resumeApi.getExperience(resumeId).then(({ data }) => setExperiences(data || [])).catch(() => setExperiences([]))
-  }, [resumeId])
+    let cancelled = false
+    resumeApi.getExperience(resumeId).then(({ data }) => {
+      if (!cancelled && String(currentResumeId) === String(resumeId)) setExperiences(data || [])
+    }).catch(() => { if (!cancelled) setExperiences([]) })
+    return () => { cancelled = true }
+  }, [resumeId, currentResumeId])
 
   const run = async () => {
     if (!resumeId || !experienceId) { setError('Please select a resume and an experience entry.'); return }
     setError(''); setApplied(false); setLoading(true)
     try {
       const { data } = await aiApi.improveExperience(resumeId, experienceId, { instruction: instruction || undefined })
+      if (String(currentResumeId) !== String(resumeId)) throw new Error('The active resume changed. Please run the request again.')
       setImproved(data.improved_description)
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong.')
@@ -482,14 +503,17 @@ function ImproveExperienceTool() {
   }
 
   const applyChange = async () => {
+    const operationResumeId = resumeId
     setApplying(true)
     try {
-      await aiApi.applyChange(resumeId, {
+      await aiApi.applyChange(operationResumeId, {
         action: 'update',
         section: 'experience',
         target_id: Number(experienceId),
         content: improved,
       })
+      if (String(currentResumeId) !== operationResumeId) throw new Error('The active resume changed before the AI change was applied.')
+      await loadResume(operationResumeId)
       setApplied(true)
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not apply the change.')
@@ -500,7 +524,7 @@ function ImproveExperienceTool() {
 
   return (
     <>
-      <ResumeSelect resumes={resumes} value={resumeId} onChange={setResumeId} onUploaded={(r) => setResumes((prev) => [...prev, r])} />
+      <ResumeSelect resumes={resumes} value={resumeId} onChange={selectResume} />
 
       <Field>
         <label style={label}>Experience</label>
@@ -549,8 +573,9 @@ function ImproveExperienceTool() {
    TOOL: Improve Project
 ============================================================ */
 function ImproveProjectTool() {
-  const [resumes, setResumes] = useState([])
-  const [resumeId, setResumeId] = useState('')
+  const { currentResumeId, savedResumes, selectResume, loadResume } = useResume()
+  const resumeId = currentResumeId ? String(currentResumeId) : ''
+  const resumes = savedResumes || []
   const [projects, setProjects] = useState([])
   const [projectId, setProjectId] = useState('')
   const [instruction, setInstruction] = useState('')
@@ -561,20 +586,21 @@ function ImproveProjectTool() {
   const [applied, setApplied] = useState(false)
 
   useEffect(() => {
-    resumeApi.list().then(({ data }) => setResumes(data || [])).catch(() => setResumes([]))
-  }, [])
-
-  useEffect(() => {
     setProjectId('')
     if (!resumeId) { setProjects([]); return }
-    resumeApi.getProjects(resumeId).then(({ data }) => setProjects(data || [])).catch(() => setProjects([]))
-  }, [resumeId])
+    let cancelled = false
+    resumeApi.getProjects(resumeId).then(({ data }) => {
+      if (!cancelled && String(currentResumeId) === String(resumeId)) setProjects(data || [])
+    }).catch(() => { if (!cancelled) setProjects([]) })
+    return () => { cancelled = true }
+  }, [resumeId, currentResumeId])
 
   const run = async () => {
     if (!resumeId || !projectId) { setError('Please select a resume and a project entry.'); return }
     setError(''); setApplied(false); setLoading(true)
     try {
       const { data } = await aiApi.improveProject(resumeId, projectId, { instruction: instruction || undefined })
+      if (String(currentResumeId) !== String(resumeId)) throw new Error('The active resume changed. Please run the request again.')
       setImproved(data.improved_description)
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong.')
@@ -584,14 +610,17 @@ function ImproveProjectTool() {
   }
 
   const applyChange = async () => {
+    const operationResumeId = resumeId
     setApplying(true)
     try {
-      await aiApi.applyChange(resumeId, {
+      await aiApi.applyChange(operationResumeId, {
         action: 'update',
         section: 'project',
         target_id: Number(projectId),
         content: improved,
       })
+      if (String(currentResumeId) !== operationResumeId) throw new Error('The active resume changed before the AI change was applied.')
+      await loadResume(operationResumeId)
       setApplied(true)
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not apply the change.')
@@ -602,7 +631,7 @@ function ImproveProjectTool() {
 
   return (
     <>
-      <ResumeSelect resumes={resumes} value={resumeId} onChange={setResumeId} onUploaded={(r) => setResumes((prev) => [...prev, r])} />
+      <ResumeSelect resumes={resumes} value={resumeId} onChange={selectResume} />
 
       <Field>
         <label style={label}>Project</label>
@@ -651,22 +680,20 @@ function ImproveProjectTool() {
    TOOL: Generate Content (any section, from a prompt)
 ============================================================ */
 function GenerateContentTool() {
-  const [resumes, setResumes] = useState([])
-  const [resumeId, setResumeId] = useState('')
+  const { currentResumeId, savedResumes, selectResume } = useResume()
+  const resumeId = currentResumeId ? String(currentResumeId) : ''
+  const resumes = savedResumes || []
   const [prompt, setPrompt] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
-
-  useEffect(() => {
-    resumeApi.list().then(({ data }) => setResumes(data || [])).catch(() => setResumes([]))
-  }, [])
 
   const run = async () => {
     if (!resumeId || !prompt.trim()) { setError('Please select a resume and enter a prompt.'); return }
     setError(''); setLoading(true)
     try {
       const { data } = await aiApi.generateResumeContent(resumeId, { prompt })
+      if (String(currentResumeId) !== String(resumeId)) throw new Error('The active resume changed. Please run the request again.')
       setResult(data)
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong.')
@@ -677,7 +704,7 @@ function GenerateContentTool() {
 
   return (
     <>
-      <ResumeSelect resumes={resumes} value={resumeId} onChange={setResumeId} onUploaded={(r) => setResumes((prev) => [...prev, r])} />
+      <ResumeSelect resumes={resumes} value={resumeId} onChange={selectResume} />
 
       <Field>
         <label style={label}>Prompt</label>
@@ -736,22 +763,20 @@ function GenerateContentTool() {
    TOOL: Generate Resume
 ============================================================ */
 function GenerateResumeTool() {
-  const [resumes, setResumes] = useState([])
-  const [resumeId, setResumeId] = useState('')
+  const { currentResumeId, savedResumes, selectResume } = useResume()
+  const resumeId = currentResumeId ? String(currentResumeId) : ''
+  const resumes = savedResumes || []
   const [instruction, setInstruction] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [content, setContent] = useState('')
-
-  useEffect(() => {
-    resumeApi.list().then(({ data }) => setResumes(data || [])).catch(() => setResumes([]))
-  }, [])
 
   const run = async () => {
     if (!resumeId) { setError('Please select a resume.'); return }
     setError(''); setLoading(true)
     try {
       const { data } = await aiApi.generateResume(resumeId, { instruction: instruction || undefined })
+      if (String(currentResumeId) !== String(resumeId)) throw new Error('The active resume changed. Please run the request again.')
       setContent(data.content)
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong.')
@@ -762,7 +787,7 @@ function GenerateResumeTool() {
 
   return (
     <>
-      <ResumeSelect resumes={resumes} value={resumeId} onChange={setResumeId} onUploaded={(r) => setResumes((prev) => [...prev, r])} />
+      <ResumeSelect resumes={resumes} value={resumeId} onChange={selectResume} />
 
       <Field>
         <label style={label}>Additional Instructions (Optional)</label>
@@ -800,10 +825,14 @@ function AnalyzeJobDescriptionTool() {
   const [jdId, setJdId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [listError, setListError] = useState('')
   const [analysis, setAnalysis] = useState(null)
 
   useEffect(() => {
-    jobDescriptionApi.list().then(({ data }) => setList(data || [])).catch(() => setList([]))
+    jobDescriptionApi.list().then(({ data }) => setList(data || [])).catch((err) => {
+      setList([])
+      setListError(err.response?.data?.detail || 'Could not load job descriptions.')
+    })
   }, [])
 
   const run = async () => {
@@ -828,7 +857,7 @@ function AnalyzeJobDescriptionTool() {
 
   return (
     <>
-      <JobDescriptionSelect list={list} value={jdId} onChange={setJdId} />
+      <JobDescriptionSelect list={list} value={jdId} onChange={setJdId} error={listError} />
 
       <button style={primaryBtn} onClick={run} disabled={loading}>
         {loading ? 'Analyzing…' : 'Analyze with AI'}
@@ -861,20 +890,25 @@ function AnalyzeJobDescriptionTool() {
    TOOL: Tailored Resume
 ============================================================ */
 function TailoredResumeTool() {
-  const [resumes, setResumes] = useState([])
-  const [resumeId, setResumeId] = useState('')
+  const { currentResumeId, savedResumes, selectResume, loadResume } = useResume()
+  const resumeId = currentResumeId ? String(currentResumeId) : ''
+  const resumes = savedResumes || []
   const [jdList, setJdList] = useState([])
   const [jdId, setJdId] = useState('')
   const [instruction, setInstruction] = useState('')
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
+  const [jdError, setJdError] = useState('')
   const [tailored, setTailored] = useState(null)
+  const [approvedChangeIds, setApprovedChangeIds] = useState(new Set())
   const [applied, setApplied] = useState(false)
 
   useEffect(() => {
-    resumeApi.list().then(({ data }) => setResumes(data || [])).catch(() => setResumes([]))
-    jobDescriptionApi.list().then(({ data }) => setJdList(data || [])).catch(() => setJdList([]))
+    jobDescriptionApi.list().then(({ data }) => setJdList(data || [])).catch((err) => {
+      setJdList([])
+      setJdError(err.response?.data?.detail || 'Could not load job descriptions.')
+    })
   }, [])
 
   const run = async () => {
@@ -882,7 +916,9 @@ function TailoredResumeTool() {
     setError(''); setApplied(false); setLoading(true)
     try {
       const { data } = await aiApi.generateTailoredResume(resumeId, jdId, { instruction: instruction || undefined })
+      if (String(currentResumeId) !== String(resumeId)) throw new Error('The active resume changed. Please run the request again.')
       setTailored(data)
+      setApprovedChangeIds(new Set((data.changes || []).map((change, index) => changeKey(change, index))))
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong.')
     } finally {
@@ -891,13 +927,36 @@ function TailoredResumeTool() {
   }
 
   const applyTailored = async () => {
+    const operationResumeId = resumeId
+    const approvedChanges = (Array.isArray(tailored?.changes) ? tailored.changes : []).filter((change, index) =>
+      approvedChangeIds.has(changeKey(change, index))
+    )
+    const approvedSummary = approvedChanges.find((change) => change.section === 'summary')
+    const experienceUpdates = {}
+    const projectUpdates = {}
+
+    approvedChanges.forEach((change) => {
+      const tailoredContent = changeContent(change, 'tailored', 'new_content')
+      if (change.section === 'experience' && change.target_id != null) {
+        experienceUpdates[change.target_id] = tailoredContent
+      }
+      if (change.section === 'project' && change.target_id != null) {
+        projectUpdates[change.target_id] = tailoredContent
+      }
+    })
+
     setApplying(true)
     try {
-      const structured = tailored?.structured
-      await aiApi.applyTailoredResume(resumeId, {
-        summary: structured?.summary || undefined,
+      await aiApi.applyTailoredResume(operationResumeId, {
+        summary: approvedSummary
+          ? changeContent(approvedSummary, 'tailored', 'new_content')
+          : undefined,
         skill_ids: [],
+        experience_updates: experienceUpdates,
+        project_updates: projectUpdates,
       })
+      if (String(currentResumeId) !== operationResumeId) throw new Error('The active resume changed before the AI change was applied.')
+      await loadResume(operationResumeId)
       setApplied(true)
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not apply the tailored resume.')
@@ -906,10 +965,111 @@ function TailoredResumeTool() {
     }
   }
 
+  const selectedJobDescription = jdList.find((item) => String(item.id) === String(jdId))
+  const structured = tailored?.structured || {}
+  const changes = Array.isArray(tailored?.changes) ? tailored.changes : []
+  const changeKey = (change, index) => `${change.id || change.section || 'change'}:${change.target_id ?? 'summary'}:${index}`
+  const changeContent = (change, primary, fallback = '') => change[primary] ?? change[fallback] ?? ''
+  const changeTargetLabel = (change) => {
+    if (change.section === 'experience') {
+      const item = (structured.experience || []).find(
+        (entry) => String(entry.experience_id ?? entry.id) === String(change.target_id),
+      )
+      return item?.company || `#${change.target_id}`
+    }
+    if (change.section === 'project') {
+      const item = (structured.projects || []).find(
+        (entry) => String(entry.project_id ?? entry.id) === String(change.target_id),
+      )
+      return item?.title || item?.project_title || `#${change.target_id}`
+    }
+    return 'Resume summary'
+  }
+  const toggleChange = (changeKeyValue) => {
+    setApprovedChangeIds((current) => {
+      const next = new Set(current)
+      if (next.has(changeKeyValue)) next.delete(changeKeyValue)
+      else next.add(changeKeyValue)
+      return next
+    })
+  }
+
+  const approvedCount = approvedChangeIds.size
+
+  const renderChanges = () => {
+    if (changes.length === 0) return null
+    return (
+      <div style={{ marginTop: 20 }}>
+        <p style={{ ...label, marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Proposed Changes</p>
+        {changes.map((change, index) => {
+          const key = changeKey(change, index)
+          const originalContent = changeContent(change, 'original', 'old_content')
+          const tailoredContent = changeContent(change, 'tailored', 'new_content')
+
+          return (
+            <label
+              key={key}
+              style={{
+                display: 'block',
+                padding: 16,
+                marginBottom: 12,
+                background: '#fff',
+                border: '1px solid #dbeafe',
+                borderRadius: 12,
+                cursor: 'pointer',
+                boxShadow: '0 1px 4px rgba(15, 23, 42, 0.04)',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={approvedChangeIds.has(key)}
+                  onChange={() => toggleChange(key)}
+                  style={{ marginTop: 4 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                    {change.section} · {changeTargetLabel(change)}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12 }}>
+                      <span style={{ display: 'block', fontSize: '0.68rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                        Original
+                      </span>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#475569', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                        {originalContent || '(empty)'}
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#ecfdf5', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12 }}>
+                      <span style={{ display: 'block', fontSize: '0.68rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                        Tailored
+                      </span>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#14532d', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                        {tailoredContent || '(empty)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {change.reason && (
+                    <p style={{ margin: '10px 0 0', color: '#64748b', fontSize: '0.74rem', lineHeight: 1.5 }}>
+                      {change.reason}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </label>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <>
-      <ResumeSelect resumes={resumes} value={resumeId} onChange={setResumeId} onUploaded={(r) => setResumes((prev) => [...prev, r])} />
-      <JobDescriptionSelect list={jdList} value={jdId} onChange={setJdId} />
+      <ResumeSelect resumes={resumes} value={resumeId} onChange={selectResume} />
+      <JobDescriptionSelect list={jdList} value={jdId} onChange={setJdId} error={jdError} />
 
       <Field>
         <label style={label}>Additional Instructions (Optional)</label>
@@ -925,16 +1085,107 @@ function TailoredResumeTool() {
         {loading ? 'Generating…' : 'Generate Tailored Resume'}
       </button>
 
+      {loading && (
+        <div style={{ marginTop: 12, color: '#64748b', fontSize: '0.82rem' }}>
+          Analyzing the job description and comparing it with the selected resume…
+        </div>
+      )}
+
       <ErrorBox error={error} />
 
       {tailored && (
-        <ResultPanel title="AI Tailored Resume Summary">
+        <ResultPanel title="Tailored Resume Review">
+          <div style={{ marginBottom: 14, color: '#475569', fontSize: '0.82rem', lineHeight: 1.6 }}>
+            <strong>Resume:</strong> {resumes.find((item) => String(item.id) === resumeId)?.title || resumeId}
+            <br />
+            <strong>Job Description:</strong> {selectedJobDescription?.title || jdId}
+          </div>
+
+          <p style={{ ...label, marginBottom: 6 }}>Tailored Summary</p>
           <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#1e293b', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-            {tailored.structured?.summary || tailored.content}
+            {structured.summary || tailored.content}
           </p>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button style={primaryBtn} onClick={applyTailored} disabled={applying}>
-              {applied ? '✓ Applied' : applying ? 'Applying…' : 'Apply Tailored Resume'}
+
+          <div style={{ marginTop: 16, marginBottom: 8 }}>
+            <p style={{ ...label, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>JD Match Overview</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              <div style={{ padding: 12, background: '#ecfdf5', borderRadius: 10, border: '1px solid #bbf7d0' }}>
+                <p style={{ ...label, color: '#047857', marginBottom: 6 }}>Matched Skills</p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#065f46' }}>
+                  {(structured.matched_skills || []).length || 0}
+                </p>
+              </div>
+              <div style={{ padding: 12, background: '#fff7ed', borderRadius: 10, border: '1px solid #fed7aa' }}>
+                <p style={{ ...label, color: '#c2410c', marginBottom: 6 }}>Missing Skills</p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#9a3412' }}>
+                  {(structured.missing_skills || []).length || 0}
+                </p>
+              </div>
+              <div style={{ padding: 12, background: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe' }}>
+                <p style={{ ...label, color: '#1d4ed8', marginBottom: 6 }}>Matched Keywords</p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#1e3a8a' }}>
+                  {(structured.matched_keywords || []).length || 0}
+                </p>
+              </div>
+              <div style={{ padding: 12, background: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca' }}>
+                <p style={{ ...label, color: '#b91c1c', marginBottom: 6 }}>Missing Keywords</p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#991b1b' }}>
+                  {(structured.missing_keywords || []).length || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <div style={{ padding: 12, background: '#ecfdf5', borderRadius: 10, border: '1px solid #bbf7d0' }}>
+              <p style={{ ...label, color: '#047857' }}>Matched Skills</p>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: '#065f46', whiteSpace: 'pre-wrap' }}>
+                {(structured.matched_skills || []).join(', ') || 'None identified'}
+              </p>
+            </div>
+            <div style={{ padding: 12, background: '#fff7ed', borderRadius: 10, border: '1px solid #fed7aa' }}>
+              <p style={{ ...label, color: '#c2410c' }}>Missing Skills</p>
+              <p style={{ margin: '0 0 6px', fontSize: '0.76rem', color: '#9a3412', fontWeight: 600 }}>
+                Missing skills — not currently present in your resume
+              </p>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: '#9a3412', whiteSpace: 'pre-wrap' }}>
+                {(structured.missing_skills || []).join(', ') || 'None identified'}
+              </p>
+            </div>
+          </div>
+
+          {renderChanges()}
+
+          {(structured.matched_keywords || []).length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <p style={label}>Matched Keywords</p>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: '#475569' }}>
+                {structured.matched_keywords.join(', ')}
+              </p>
+            </div>
+          )}
+          {(structured.missing_keywords || []).length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <p style={label}>Missing Keywords</p>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: '#9a3412' }}>
+                {structured.missing_keywords.join(', ')}
+              </p>
+            </div>
+          )}
+          {(structured.recommendations || []).length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <p style={label}>Recommendations</p>
+              <ul style={{ margin: 0, paddingLeft: 20, color: '#475569', fontSize: '0.82rem' }}>
+                {structured.recommendations.map((recommendation) => (
+                  <li key={recommendation}>{recommendation}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 16 }}>
+            <button style={{ ...primaryBtn }} onClick={applyTailored} disabled={applying || approvedCount === 0}>
+              {applied ? '✓ Applied' : applying ? 'Applying…' : `Apply Selected Changes${approvedCount > 0 ? ` (${approvedCount})` : ''}`}
             </button>
           </div>
         </ResultPanel>
@@ -964,11 +1215,11 @@ export default function AIAssistant() {
 
   if (!activeId) {
     return (
-      <div>
+      <div style={pageShell}>
         <Dashboard />
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
           gap: 20,
         }}>
           {TOOLS.map((tool) => (
@@ -980,34 +1231,36 @@ export default function AIAssistant() {
   }
 
   return (
-    <div style={{ ...card, padding: 28, maxWidth: 720 }}>
-      <button
-        onClick={() => setActiveId(null)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, background: 'none',
-          border: 'none', color: '#64748b', fontSize: '0.8rem', fontWeight: 600,
-          cursor: 'pointer', padding: 0, marginBottom: 18,
-        }}
-      >
-        <FaArrowLeft size={12} /> Back to AI Tools
-      </button>
+    <div style={pageShell}>
+      <div style={{ ...card, padding: 28, width: '100%', boxSizing: 'border-box' }}>
+        <button
+          onClick={() => setActiveId(null)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'none',
+            border: 'none', color: '#64748b', fontSize: '0.8rem', fontWeight: 600,
+            cursor: 'pointer', padding: 0, marginBottom: 18,
+          }}
+        >
+          <FaArrowLeft size={12} /> Back to AI Tools
+        </button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: '50%', background: activeTool.bg,
-          color: activeTool.fg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {activeTool.icon}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%', background: activeTool.bg,
+            color: activeTool.fg, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {activeTool.icon}
+          </div>
+          <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#1e293b' }}>
+            {activeTool.title}
+          </h2>
         </div>
-        <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#1e293b' }}>
-          {activeTool.title}
-        </h2>
-      </div>
-      <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '4px 0 22px' }}>
-        {activeTool.desc}
-      </p>
+        <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '4px 0 22px' }}>
+          {activeTool.desc}
+        </p>
 
-      <ActiveComponent />
+        <ActiveComponent />
+      </div>
     </div>
   )
 }

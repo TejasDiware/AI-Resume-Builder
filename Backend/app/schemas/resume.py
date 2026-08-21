@@ -13,6 +13,11 @@ class ResumeCreate(BaseModel):
         max_length=150,
     )
 
+    job_description_id: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
     # Actual frontend template ID.
     #
     # Example:
@@ -40,6 +45,11 @@ class ResumeUpdate(BaseModel):
         max_length=150,
     )
 
+    job_description_id: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
     template_id: int | None = Field(
         default=None,
         ge=1,
@@ -58,6 +68,8 @@ class ResumeResponse(BaseModel):
     id: int
     user_id: int
     title: str
+
+    job_description_id: int | None
 
     # Actual frontend template ID
     template_id: int

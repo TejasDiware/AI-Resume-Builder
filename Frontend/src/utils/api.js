@@ -160,6 +160,15 @@ export const resumeApi = {
 
 export const jobDescriptionApi = {
   create: (data)     => api.post('/api/v1/job-descriptions', data),
+  upload: (file, title, company) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('title', title)
+    if (company) formData.append('company', company)
+    return api.post('/api/v1/job-descriptions/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   list:   ()         => api.get('/api/v1/job-descriptions'),
   get:    (id)        => api.get(`/api/v1/job-descriptions/${id}`),
   update: (id, data)  => api.put(`/api/v1/job-descriptions/${id}`, data),
@@ -220,8 +229,10 @@ export const achievementApi = {
     ),
 }
 export const dashboardApi = {
-  get: (resumeId) =>
-    api.get(`/api/v1/dashboard/${resumeId}`),
+  get: (resumeId, jobDescriptionId) =>
+    api.get(`/api/v1/dashboard/${resumeId}`, {
+      params: jobDescriptionId ? { job_description_id: jobDescriptionId } : undefined,
+    }),
 }
 
 export const qualityApi = {
@@ -234,9 +245,8 @@ export const qualityApi = {
     ),
 }
 export const pdfApi = {
-  download: (resumeId, template = 'classic') =>
+  download: (resumeId) =>
     api.get(`/api/v1/resumes/${resumeId}/pdf`, {
-      params: { template },
       responseType: 'blob',
     }),
 }

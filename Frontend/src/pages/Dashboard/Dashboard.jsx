@@ -12,7 +12,7 @@ import {
 } from 'react-icons/md'
 import { GiBrain } from 'react-icons/gi'
 import { useResume } from '../../context/ResumeContext'
-import { dashboardApi } from '../../utils/api'
+import { dashboardApi, jobDescriptionApi } from '../../utils/api'
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, bg, iconColor }) {
@@ -247,6 +247,8 @@ export default function Dashboard() {
   const [dashboardData, setDashboardData] = useState(null)
   const [dashboardLoading, setDashboardLoading] = useState(true)
   const [dashboardError, setDashboardError] = useState('')
+  const [jobDescriptions, setJobDescriptions] = useState([])
+  const [selectedJobDescriptionId, setSelectedJobDescriptionId] = useState('')
 
   const p = ctx?.profileData
 
@@ -254,23 +256,28 @@ export default function Dashboard() {
 
   const firstName = p?.firstName || 'User'
 
-  const resumeId = (() => {
-    // Only pass a real backend ID (positive integer < 2^31) to the API.
-    // Date.now() IDs are 13-digit timestamps used for locally-created resumes
-    // that have not yet been persisted — sending them causes 500 errors.
-    const MAX_BACKEND_ID = 2_147_483_647 // PostgreSQL int max
-    const candidate = ctx?.currentResumeId || resumes[0]?.id
-    if (!candidate) return null
-    const n = Number(candidate)
-    return Number.isInteger(n) && n > 0 && n <= MAX_BACKEND_ID ? n : null
-  })()
+  const resumeId = ctx?.currentResumeId || null
+
+  useEffect(() => {
+    let cancelled = false
+    jobDescriptionApi.list()
+      .then(({ data }) => {
+        if (!cancelled) setJobDescriptions(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (!cancelled) setJobDescriptions([])
+      })
+    return () => { cancelled = true }
+  }, [])
 
   // ── Dashboard API Integration ──
   useEffect(() => {
+    let cancelled = false
+
     const loadDashboard = async () => {
-      // Skip API call entirely if there's no valid backend resume ID.
-      // Fake local IDs (Date.now() timestamps) are > PostgreSQL int max.
       if (!resumeId) {
+        setDashboardData(null)
+        setDashboardError('')
         setDashboardLoading(false)
         return
       }
@@ -279,23 +286,27 @@ export default function Dashboard() {
         setDashboardLoading(true)
         setDashboardError('')
 
-        const { data } = await dashboardApi.get(resumeId)
+        const { data } = await dashboardApi.get(resumeId, selectedJobDescriptionId)
 
-        setDashboardData(data)
+        if (!cancelled) setDashboardData(data)
       } catch (requestError) {
         console.error('Dashboard API Error:', requestError)
 
-        setDashboardError(
-          requestError.response?.data?.detail ||
-          `Dashboard API failed (${requestError.response?.status || 'Network Error'})`
-        )
+        if (!cancelled) {
+          setDashboardData(null)
+          setDashboardError(
+            requestError.response?.data?.detail ||
+            `Dashboard API failed (${requestError.response?.status || 'Network Error'})`
+          )
+        }
       } finally {
-        setDashboardLoading(false)
+        if (!cancelled) setDashboardLoading(false)
       }
     }
 
     loadDashboard()
-  }, [resumeId])
+    return () => { cancelled = true }
+  }, [resumeId, selectedJobDescriptionId])
 
   const expCount = ctx?.experiences?.length || 0
   const skillCount = ctx?.skills?.length || 0
@@ -344,6 +355,21 @@ export default function Dashboard() {
     )
   }
 
+  if (!resumeId) {
+    return (
+      <div style={{ background: '#f3f4f6', minHeight: '100vh', padding: '40px 20px' }}>
+        <div style={{ background: '#fff', borderRadius: 16, padding: 40, textAlign: 'center' }}>
+          <MdOutlineDescription size={52} color="#d1d5db" />
+          <h2 style={{ color: '#374151', fontSize: '1.1rem' }}>No active resume</h2>
+          <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>Select or create a resume to view its dashboard.</p>
+          <button onClick={() => navigate('/app/resume')} style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer' }}>
+            Manage Resumes
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{
       background: '#f3f4f6',
@@ -383,7 +409,52 @@ export default function Dashboard() {
         }}>
           Here's an overview of your resume building progress.
         </p>
+
+        {jobDescriptions.length > 0 && (
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginTop: 14, color: '#475569', fontSize: '0.82rem', fontWeight: 600 }}>
+            Compare with a job description
+            <select
+              value={selectedJobDescriptionId}
+              onChange={(event) => setSelectedJobDescriptionId(event.target.value)}
+              style={{ border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', color: '#334155', padding: '8px 10px', fontSize: '0.82rem' }}
+            >
+              <option value="">Resume only</option>
+              {jobDescriptions.map((jobDescription) => (
+                <option key={jobDescription.id} value={jobDescription.id}>
+                  {jobDescription.title}{jobDescription.company ? ` - ${jobDescription.company}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
+
+      {dashboardData && String(dashboardData.resume_id) === String(resumeId) && (
+        <>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28 }}>
+          <StatCard icon={<MdCheckCircleOutline size={25} color="#16a34a" />} label="Resume Quality" value={`${Math.round(dashboardData.resume_quality_score)}%`} bg="#dcfce7" />
+          <StatCard icon={<MdOutlineDescription size={25} color="#4f46e5" />} label="Completeness" value={`${Math.round(dashboardData.completeness_score)}%`} bg="#eef2ff" />
+          <StatCard icon={<GiBrain size={25} color="#0891b2" />} label="Matched Skills" value={dashboardData.matched_skills?.length || 0} bg="#cffafe" />
+          <StatCard icon={<MdOutlineArticle size={25} color="#ea580c" />} label="Open Issues" value={dashboardData.issues?.length || 0} bg="#ffedd5" />
+        </div>
+        {selectedJobDescriptionId && (
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 28 }}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 20, flex: '1 1 280px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
+              <p style={{ color: '#1e293b', fontWeight: 700, margin: '0 0 12px' }}>Job match</p>
+              <div style={{ display: 'flex', gap: 24, color: '#475569', fontSize: '0.88rem' }}>
+                <span>ATS: <strong>{dashboardData.ats_score == null ? 'N/A' : `${Math.round(dashboardData.ats_score)}%`}</strong></span>
+                <span>Keywords: <strong>{dashboardData.keywords_score == null ? 'N/A' : `${Math.round(dashboardData.keywords_score)}%`}</strong></span>
+              </div>
+            </div>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 20, flex: '1 1 280px', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
+              <p style={{ color: '#1e293b', fontWeight: 700, margin: '0 0 12px' }}>Keyword gaps</p>
+              <p style={{ color: '#166534', fontSize: '0.82rem', margin: '0 0 8px' }}>Matched: {(dashboardData.matched_keywords || []).join(', ') || 'None returned'}</p>
+              <p style={{ color: '#b91c1c', fontSize: '0.82rem', margin: 0 }}>Missing: {(dashboardData.missing_keywords || []).join(', ') || 'None returned'}</p>
+            </div>
+          </div>
+        )}
+        </>
+      )}
 
       {/* ── Middle Row ── */}
       <div style={{

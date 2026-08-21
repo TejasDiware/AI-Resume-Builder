@@ -2,11 +2,13 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=0
 
 WORKDIR /app
 
-# System libraries required by PDF/DOCX/ML dependencies.
+# System libraries required by PDF/DOCX/ML dependencies
+# and Chromium rendering.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc \
@@ -14,6 +16,8 @@ RUN apt-get update \
         libglib2.0-0 \
         libgl1 \
         libgomp1 \
+        chromium \
+        chromium-driver \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

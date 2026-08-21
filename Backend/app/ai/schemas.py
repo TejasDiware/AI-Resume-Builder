@@ -177,10 +177,23 @@ class GenerateAndSaveTailoredResumeResponse(BaseModel):
 
 
 class TailoredResumeContent(BaseModel):
-    summary: str
-    skills: list[str]
-    experience: list[str]
-    projects: list[str]
+    summary: str = ""
+    profile: dict = Field(default_factory=dict)
+    skills: list[str] = Field(default_factory=list)
+    education: list[dict] = Field(default_factory=list)
+    experience: list[dict | str] = Field(default_factory=list)
+    projects: list[dict | str] = Field(default_factory=list)
+    certifications: list[dict] = Field(default_factory=list)
+    languages: list[dict] = Field(default_factory=list)
+    achievements: list[dict] = Field(default_factory=list)
+    relevant_existing_skills: list[str] = Field(
+        default_factory=list
+    )
+    matched_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    matched_keywords: list[str] = Field(default_factory=list)
+    missing_keywords: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
 
 
 class TailoredResumeResponse(BaseModel):
@@ -188,6 +201,9 @@ class TailoredResumeResponse(BaseModel):
     job_description_id: int
     content: str
     structured: TailoredResumeContent | None = None
+    job_description_analysis: dict = Field(
+        default_factory=dict
+    )
     changes: list[AIChange] = Field(
         default_factory=list,
     )
@@ -222,6 +238,14 @@ class GeneratedTailoredContent(BaseModel):
     projects: list[GeneratedTailoredProject] = Field(
         default_factory=list
     )
+    relevant_existing_skills: list[str] = Field(
+        default_factory=list
+    )
+    matched_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    matched_keywords: list[str] = Field(default_factory=list)
+    missing_keywords: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
 
 
 

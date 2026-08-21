@@ -79,7 +79,7 @@ export default function Projects() {
   const templateId = params.get('template') || '1'
 
   const { projects: ctxProjects, setProjects: setContextProjects, setProjectsSaved,
-          ensureResumeExists, saveProjectsToBackend, resumeTitle } = useResume()
+      ensureResumeExists, saveProjectsToBackend, resumeTitle } = useResume()
 
   // Ensure the correct template's data is active when entering this page
   const _projCtx = useResume()
@@ -89,7 +89,8 @@ export default function Projects() {
 
   const mapP = (p) => ({
     ...emptyProject,
-    id:           p.id          || Date.now(),
+    ...p,
+    id:           p.id          ?? null,
     title:        p.name        || p.title || '',
     technologies: Array.isArray(p.techStack) ? p.techStack.join(', ') : (p.technologies || ''),
     role:         p.role        || '',
@@ -110,10 +111,8 @@ export default function Projects() {
     // Draft data is written only for the live preview; do not let it replace
     // the local form while the user is still typing.
     if (ctxProjects?.some(project => project.id === 'draft-project' || project.isDraft)) return
-    if (ctxProjects?.length) {
-      setProjects(ctxProjects.map(mapP))
-      setShowForm(false)
-    }
+    setProjects(ctxProjects?.length ? ctxProjects.map(mapP) : [])
+    if (!ctxProjects?.length) setForm({ ...emptyProject })
   }, [ctxProjects])
   const [form, setForm] = useState({ ...emptyProject })
   const [editingId, setEditingId] = useState(null)
@@ -121,13 +120,14 @@ export default function Projects() {
   const [saved,  setSaved]  = useState(false)
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState({})
+  const [backendError, setBackendError] = useState('')
 
   const update = (field, val) => {
     setForm(prev => {
       const nextForm = { ...prev, [field]: val }
       const previewProjects = editingId !== null
         ? projects.map(project => project.id === editingId ? { ...nextForm, id: editingId, isDraft: true } : project)
-        : [...projects, { ...nextForm, id: 'draft-project', isDraft: true }]
+        : [...projects, { ...nextForm, isDraft: true }]
 
       // Keep the live resume preview in sync while the user is typing.
       setContextProjects(previewProjects)
@@ -155,7 +155,7 @@ export default function Projects() {
       updated = projects.map(p => (p.id === editingId ? { ...form, id: editingId } : p))
       setEditingId(null)
     } else {
-      updated = [...projects, { ...form, id: Date.now() }]
+      updated = [...projects, { ...form, id: null }]
     }
     setProjects(updated)
     setContextProjects(updated)   // sync to live preview
@@ -186,6 +186,8 @@ export default function Projects() {
 
   const handleFinish = async () => {
     setSaving(true)
+    setBackendError('')
+    let saveFailed = false
 
     // Always save to localStorage first (offline-safe)
     setContextProjects(projects)
@@ -199,13 +201,16 @@ export default function Projects() {
       }
     } catch (err) {
       console.error('Backend save failed (projects):', err)
+      setBackendError(err.response?.data?.detail || err.message || 'Failed to save projects')
+      saveFailed = true
     }
 
     setSaving(false)
+    if (saveFailed) return
     setSaved(true)
     setTimeout(() => {
       setSaved(false)
-      navigate(`/app/resume-builder/portfolio?template=${templateId}`)
+      navigate(`/app/resume-builder/certifications?template=${templateId}`)
     }, 800)
   }
 
@@ -489,6 +494,9 @@ export default function Projects() {
 
         {/* ── Navigation ── */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          {backendError && (
+            <p style={{ color: '#b91c1c', fontSize: '0.78rem', margin: 0 }}>{backendError}</p>
+          )}
           <button type="button" onClick={() => safeNavigate(navigate, `/resume-builder/skills?template=${templateId}`)}
             style={{ flex: 1, padding: '10px 0', borderRadius: 999, fontSize: '0.83rem', fontWeight: 600, border: '2px solid #4f46e5', background: '#fff', color: '#4f46e5', cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.background = '#eef2ff'}

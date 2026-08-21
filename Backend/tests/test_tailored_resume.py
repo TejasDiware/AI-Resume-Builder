@@ -5,6 +5,8 @@ from app.ai.schemas import (
     TailoredResumeContent,
     TailoredResumeResponse,
 )
+from app.ai.jd_schemas import JobDescriptionAnalysis
+from app.ai.service import AIService
 from app.api.routes.ai import get_ai_service
 from app.main import app
 from app.models.experience import Experience
@@ -17,6 +19,21 @@ from tests.test_resume import (
 
 
 class FakeTailoredResumeAIService:
+    def analyze_job_description(
+        self,
+        title: str,
+        company: str | None,
+        description: str,
+    ):
+        assert title == "Machine Learning Engineer"
+        assert "NLP" in description
+        return JobDescriptionAnalysis(
+            job_title=title,
+            required_skills=["Python", "NLP"],
+            preferred_skills=["AWS"],
+            keywords=["sentiment analysis"],
+        )
+
     def generate_tailored_resume(
         self,
         resume_id: int,
@@ -24,7 +41,16 @@ class FakeTailoredResumeAIService:
         generation_context: dict,
         job_description: str,
         instruction: str | None,
+        jd_analysis: dict | None = None,
     ):
+        assert generation_context["education"] == []
+        assert generation_context["certifications"] == []
+        assert generation_context["languages"] == []
+        assert generation_context["achievements"] == []
+        assert generation_context["skills"] == []
+        assert jd_analysis["required_skills"] == ["Python", "NLP"]
+        assert jd_analysis["preferred_skills"] == ["AWS"]
+
         experience = generation_context.get(
             "experience",
             [],
@@ -143,6 +169,255 @@ class FakeTailoredResumeAIService:
             ),
             changes=changes,
         )
+
+
+class CapturingProvider:
+    def __init__(self, response: str):
+        self.response = response
+        self.prompt = ""
+
+    def generate(self, prompt: str) -> str:
+        self.prompt = prompt
+        return self.response
+
+
+class RetryCountingProvider:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+        self.prompts = []
+
+    def generate(self, prompt: str) -> str:
+        self.calls += 1
+        self.prompts.append(prompt)
+        if self.calls > len(self.responses):
+            return self.responses[-1]
+        return self.responses[self.calls - 1]
+
+
+def test_tailored_resume_retries_once_when_output_is_essentially_unchanged():
+    original_summary = (
+        "Java backend developer with hands-on experience building secure "
+        "authentication systems and real-time client-server applications using Java."
+    )
+    original_experience = (
+        "Developed secure backend services in Java with role-based access control "
+        "and client-server integrations."
+    )
+    original_project = (
+        "Built a Java-based client-server application focused on secure access and "
+        "real-time communication features."
+    )
+
+    provider = RetryCountingProvider([
+        '{'
+        '"summary":"' + original_summary + '",' 
+        '"experience":[{"id":101,"description":"' + original_experience + '"}],'
+        '"projects":[{"id":201,"description":"' + original_project + '"}],'
+        '"relevant_existing_skills":["Java","Spring Boot","REST APIs","PostgreSQL"],'
+        '"matched_skills":["Java","Spring Boot","REST APIs","PostgreSQL"],'
+        '"missing_skills":["Kafka"],'
+        '"matched_keywords":["Java","REST APIs","PostgreSQL"],'
+        '"missing_keywords":["Kafka"],'
+        '"recommendations":["Keep the Java backend focus. "]'
+        '}',
+        '{'
+        '"summary":"Java backend engineer focused on Spring Boot, REST APIs, and PostgreSQL for secure service development.",' 
+        '"experience":[{"id":101,"description":"Developed Java backend services with Spring Boot, REST APIs, and PostgreSQL to support secure authentication and access control workflows."}],'
+        '"projects":[{"id":201,"description":"Built a Java-based backend application with REST APIs and PostgreSQL to support real-time client-server workflows and secure access control."}],'
+        '"relevant_existing_skills":["Java","Spring Boot","REST APIs","PostgreSQL"],'
+        '"matched_skills":["Java","Spring Boot","REST APIs","PostgreSQL"],'
+        '"missing_skills":["Kafka"],'
+        '"matched_keywords":["Java","REST APIs","PostgreSQL"],'
+        '"missing_keywords":["Kafka"],'
+        '"recommendations":["Emphasize the Java backend, Spring Boot, and PostgreSQL experience for the role."]'
+        '}'
+    ])
+
+    service = AIService(provider)
+    context = {
+        "profile": {
+            "first_name": "Tejas",
+            "last_name": "Diware",
+            "summary": original_summary,
+        },
+        "education": [],
+        "experience": [{
+            "id": 101,
+            "company": "DevCons Software Solutions",
+            "job_title": "Java Backend Developer",
+            "description": original_experience,
+        }],
+        "skills": ["Java", "Spring Boot", "REST APIs", "PostgreSQL", "Docker"],
+        "projects": [{
+            "id": 201,
+            "title": "Secure Client Server App",
+            "description": original_project,
+            "technologies": "Java, PostgreSQL, REST APIs",
+        }],
+        "certifications": [],
+        "languages": [],
+        "achievements": [],
+    }
+
+    result = service.generate_tailored_resume(
+        resume_id=7,
+        job_description_id=9,
+        generation_context=context,
+        job_description="Java backend developer role focused on Spring Boot, REST APIs, PostgreSQL, and secure backend services.",
+        instruction=None,
+        jd_analysis={
+            "job_title": "Java Backend Developer",
+            "required_skills": ["Java", "Spring Boot", "REST APIs", "PostgreSQL"],
+            "preferred_skills": ["Docker"],
+            "experience_requirements": [],
+            "education_requirements": [],
+            "keywords": ["Java", "REST APIs", "PostgreSQL", "Docker"],
+        },
+    )
+
+    assert provider.calls == 2
+    assert result.structured.summary != original_summary
+    assert result.structured.summary.startswith("Java backend engineer")
+    assert result.structured.matched_skills == ["Java", "Spring Boot", "REST APIs", "PostgreSQL"]
+    assert "Kafka" not in result.structured.skills
+    assert result.structured.experience[0]["company"] == "DevCons Software Solutions"
+    assert result.structured.experience[0]["job_title"] == "Java Backend Developer"
+    assert result.structured.projects[0]["project_id"] == 201
+    assert result.structured.projects[0]["title"] == "Secure Client Server App"
+
+
+def test_tailored_resume_keeps_only_existing_supported_skills_and_identity_fields():
+    provider = CapturingProvider(
+        '{'
+        '"summary":"Java backend engineer with Spring Boot and PostgreSQL experience.",' 
+        '"experience":[{"id":11,"description":"Built Java backend services with Spring Boot and PostgreSQL for secure APIs."}],'
+        '"projects":[{"id":22,"description":"Developed a Java backend application with Spring Boot and PostgreSQL for data persistence."}],'
+        '"relevant_existing_skills":["Java","Spring Boot","PostgreSQL"],'
+        '"matched_skills":["Java","Spring Boot","PostgreSQL"],'
+        '"missing_skills":["Kafka"],'
+        '"matched_keywords":["Java","Spring Boot","PostgreSQL"],'
+        '"missing_keywords":["Kafka"],'
+        '"recommendations":["Highlight the backend stack and data layer work."]'
+        '}'
+    )
+    service = AIService(provider)
+    context = {
+        "profile": {
+            "first_name": "Tejas",
+            "last_name": "Diware",
+            "summary": "Java backend developer.",
+        },
+        "education": [],
+        "experience": [{
+            "id": 11,
+            "company": "ACME Systems",
+            "job_title": "Java Developer",
+            "description": "Built secure backend APIs in Java.",
+            "start_date": "2022-01-01",
+            "end_date": "2024-01-01",
+        }],
+        "skills": ["Java", "Spring Boot", "PostgreSQL", "Docker"],
+        "projects": [{
+            "id": 22,
+            "title": "Order API",
+            "description": "Built a Java API with secure endpoints.",
+            "technologies": "Java, Spring Boot, PostgreSQL",
+        }],
+        "certifications": [],
+        "languages": [],
+        "achievements": [],
+    }
+
+    result = service.generate_tailored_resume(
+        resume_id=7,
+        job_description_id=9,
+        generation_context=context,
+        job_description="Java backend developer with Spring Boot, PostgreSQL, and secure APIs.",
+        instruction=None,
+        jd_analysis={
+            "job_title": "Java Backend Developer",
+            "required_skills": ["Java", "Spring Boot", "PostgreSQL"],
+            "preferred_skills": ["Docker"],
+            "experience_requirements": [],
+            "education_requirements": [],
+            "keywords": ["Java", "Spring Boot", "PostgreSQL"],
+        },
+    )
+
+    assert result.structured.matched_skills == ["Java", "Spring Boot", "PostgreSQL"]
+    assert result.structured.missing_skills == ["Kafka"]
+    assert "Kafka" not in result.structured.skills
+    assert result.structured.experience[0]["company"] == "ACME Systems"
+    assert result.structured.experience[0]["job_title"] == "Java Developer"
+    assert result.structured.experience[0]["tailored_description"]
+    assert result.structured.projects[0]["title"] == "Order API"
+    assert result.structured.projects[0]["project_id"] == 22
+
+
+def test_real_tailoring_service_returns_complete_structured_result():
+    provider = CapturingProvider(
+        '{'
+        '"summary":"Python engineer focused on NLP.",'
+        '"experience":[{"id":11,"description":"Built NLP tools with Python."}],'
+        '"projects":[],'
+        '"relevant_existing_skills":["Python"],'
+        '"matched_skills":["Python"],'
+        '"missing_skills":["AWS"],'
+        '"matched_keywords":["NLP"],'
+        '"missing_keywords":[],'
+        '"recommendations":["Emphasize NLP work."]'
+        '}'
+    )
+    service = AIService(provider)
+    context = {
+        "profile": {
+            "first_name": "Tejas",
+            "last_name": "Diware",
+            "summary": "Python developer.",
+        },
+        "education": [{"id": 1, "institution": "AISSMS IOIT"}],
+        "experience": [{
+            "id": 11,
+            "company": "ABC",
+            "job_title": "Developer",
+            "description": "Built tools with Python.",
+        }],
+        "skills": ["Python"],
+        "projects": [],
+        "certifications": [{"id": 2, "name": "Python Certificate"}],
+        "languages": [{"id": 3, "name": "English"}],
+        "achievements": [{"id": 4, "title": "Award", "description": "Awarded."}],
+    }
+
+    result = service.generate_tailored_resume(
+        resume_id=7,
+        job_description_id=9,
+        generation_context=context,
+        job_description="Python and AWS NLP role.",
+        instruction=None,
+        jd_analysis={
+            "job_title": "NLP Engineer",
+            "required_skills": ["Python", "AWS"],
+            "preferred_skills": [],
+            "experience_requirements": [],
+            "education_requirements": [],
+            "keywords": ["NLP"],
+        },
+    )
+
+    assert "Education:" in provider.prompt
+    assert "Certifications:" in provider.prompt
+    assert "Languages:" in provider.prompt
+    assert "Achievements:" in provider.prompt
+    assert "Structured Job Description Analysis:" in provider.prompt
+    assert result.structured is not None
+    assert result.structured.skills == ["Python"]
+    assert result.structured.matched_skills == ["Python"]
+    assert result.structured.missing_skills == ["AWS"]
+    assert result.structured.profile["first_name"] == "Tejas"
+    assert result.structured.education[0]["institution"] == "AISSMS IOIT"
+    assert result.structured.recommendations == ["Emphasize NLP work."]
 
 
 def test_generate_tailored_resume_returns_changes(

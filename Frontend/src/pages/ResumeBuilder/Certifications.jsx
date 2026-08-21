@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { MdAdd, MdDelete, MdSave, MdCheckCircle, MdEmojiEvents, MdVerified, MdLanguage, MdSportsEsports, MdPerson, MdInterests } from 'react-icons/md'
 import { useResume } from '../../context/ResumeContext'
-import { certificationApi, languageApi, achievementApi } from '../../utils/api'
 import LivePreviewPanel from '../../components/LivePreviewPanel'
 import ResumeSectionTabs from '../../components/ResumeSectionTabs'
 
@@ -42,12 +41,15 @@ function SectionTitle({ icon, title, color = '#4f46e5' }) {
   )
 }
 
-function TagInput({ items, setItems, placeholder }) {
+function TagInput({ items, setItems, placeholder, getLabel, createItem }) {
   const [input, setInput] = useState('')
+  const labelFor = item => getLabel ? getLabel(item) : item
 
   const add = () => {
     const val = input.trim()
-    if (val && !items.includes(val)) setItems(prev => [...prev, val])
+    if (val && !items.some(item => labelFor(item) === val)) {
+      setItems(prev => [...prev, createItem ? createItem(val) : val])
+    }
     setInput('')
   }
 
@@ -84,7 +86,7 @@ function TagInput({ items, setItems, placeholder }) {
             background: '#eef2ff', borderRadius: 8,
             padding: '5px 10px', fontSize: '0.82rem', color: '#4f46e5',
           }}>
-            <span>{item}</span>
+            <span>{labelFor(item)}</span>
             <button
               onClick={() => remove(i)}
               style={{
@@ -186,6 +188,9 @@ export default function Certifications() {
     references: ctxReferences,      setReferences,
     skillsDetailed: ctxSkillsDet,   setSkillsDetailed,
     ensureResumeExists,
+    saveCertificationsToBackend,
+    saveLanguagesToBackend,
+    saveAchievementsToBackend,
     currentResumeId,
     resumeTitle,
   } = useResume()
@@ -228,27 +233,29 @@ export default function Certifications() {
   }))
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   // Sync if context updates (e.g. CV import)
   useEffect(() => {
-    if (ctxCerts?.length)
-      setCerts(ctxCerts.map(c => typeof c === 'string' ? { name: c, issuer: '', year: '' } : { ...emptyCert(), ...c }))
+    setCerts(ctxCerts?.length
+      ? ctxCerts.map(c => typeof c === 'string' ? { name: c, issuer: '', year: '' } : { ...emptyCert(), ...c })
+      : [emptyCert()])
   }, [ctxCerts])
 
   useEffect(() => {
-    if (ctxAchievements?.length) setLocalAchievements([...ctxAchievements])
+    setLocalAchievements(ctxAchievements || [])
   }, [ctxAchievements])
 
   useEffect(() => {
-    if (ctxLanguages?.length) setLocalLanguages([...ctxLanguages])
+    setLocalLanguages(ctxLanguages || [])
   }, [ctxLanguages])
 
   useEffect(() => {
-    if (ctxInterests?.length) setLocalInterests([...ctxInterests])
+    setLocalInterests(ctxInterests || [])
   }, [ctxInterests])
 
   useEffect(() => {
-    if (ctxHobbies?.length) setLocalHobbies([...ctxHobbies])
+    setLocalHobbies(ctxHobbies || [])
   }, [ctxHobbies])
 
   const updateRef    = (i, field, val) =>
@@ -266,9 +273,8 @@ export default function Certifications() {
 
   const handleSave = async () => {
     const validCerts = certs.filter(c => c.name.trim())
-    const validRefs  = refs.filter(r => r.name.trim())
+    const validRefs = refs.filter(r => r.name.trim())
 
-    // Save to localStorage first (offline-safe)
     setCertifications(validCerts)
     setAchievements(achievements)
     setLanguages(languages)
@@ -278,84 +284,30 @@ export default function Certifications() {
     setSkillsDetailed(skillsDet)
 
     setSaving(true)
-
-    // Persist certifications to backend
-    // CertificationCreate: name, issuing_organization (required), issue_date, expiration_date, credential_id, credential_url
-    try {
-      const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
-      if (rid && validCerts.length > 0) {
-        // First fetch existing certifications to delete them (replace pattern)
-        const { data: existing } = await certificationApi.list(rid).catch(() => ({ data: [] }))
-        await Promise.all(
-          (existing || []).map(c => certificationApi.delete(rid, c.id).catch(() => {}))
-        )
-        // Re-create each certification
-        for (const cert of validCerts) {
-          // Convert year string to YYYY-MM-DD or null
-          const toDate = (val) => {
-            if (!val) return null
-            const year = val.toString().match(/\d{4}/)?.[0]
-            return year ? `${year}-01-01` : null
-          }
-          await certificationApi.create(rid, {
-            name:                 cert.name.trim(),
-            issuing_organization: cert.issuer?.trim() || 'Unknown',
-            issue_date:           toDate(cert.year),
-            expiration_date:      null,
-            credential_id:        null,
-            credential_url:       null,
-          })
-        }
-      }
-    } catch (err) {
-      console.error('Backend save failed (certifications):', err)
-    }
-
-    // Languages and achievements are tag strings in this form. The string is
-    // the language name or achievement title; optional API fields are null.
-    try {
-      const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
-      if (rid) {
-        const validLanguages = languages
-          .filter(language => typeof language === 'string' && language.trim())
-        const { data: existing } = await languageApi.list(rid).catch(() => ({ data: [] }))
-        await Promise.all(
-          (existing || []).map(language => languageApi.delete(rid, language.id).catch(() => {}))
-        )
-        for (const language of validLanguages) {
-          await languageApi.create(rid, {
-            name: language.trim(),
-            proficiency: null,
-          })
-        }
-      }
-    } catch (err) {
-      console.error('Backend save failed (languages):', err)
-    }
+    setSaveError('')
+    let saveFailed = false
 
     try {
       const rid = await ensureResumeExists(resumeTitle || 'Untitled Resume')
-      if (rid) {
-        const validAchievements = achievements
-          .filter(achievement => typeof achievement === 'string' && achievement.trim())
-        const { data: existing } = await achievementApi.list(rid).catch(() => ({ data: [] }))
-        await Promise.all(
-          (existing || []).map(achievement => achievementApi.delete(rid, achievement.id).catch(() => {}))
-        )
-        for (const achievement of validAchievements) {
-          await achievementApi.create(rid, {
-            title: achievement.trim(),
-            description: null,
-            organization: null,
-            year: null,
-          })
-        }
-      }
+      if (!rid) throw new Error('An active resume is required to save these sections.')
+
+      await saveCertificationsToBackend(validCerts, rid)
+      await saveLanguagesToBackend(languages.filter(language => {
+        const value = typeof language === 'string' ? language : language.name || language.language
+        return value?.trim()
+      }), rid)
+      await saveAchievementsToBackend(achievements.filter(achievement => {
+        const value = typeof achievement === 'string' ? achievement : achievement.title
+        return value?.trim()
+      }), rid)
     } catch (err) {
-      console.error('Backend save failed (achievements):', err)
+      console.error('Backend save failed (certifications/languages/achievements):', err)
+      setSaveError(err.response?.data?.detail || err.message || 'Failed to save certifications, languages, or achievements')
+      saveFailed = true
     }
 
     setSaving(false)
+    if (saveFailed) return
     setSaved(true)
     setTimeout(() => {
       setSaved(false)
@@ -442,6 +394,8 @@ export default function Certifications() {
             items={achievements}
             setItems={setLocalAchievements}
             placeholder="e.g. Won 1st place in National Hackathon 2023"
+            getLabel={achievement => typeof achievement === 'string' ? achievement : achievement.title || ''}
+            createItem={title => ({ title, description: '', organization: '', year: '' })}
           />
         </div>
 
@@ -455,6 +409,8 @@ export default function Certifications() {
             items={languages}
             setItems={setLocalLanguages}
             placeholder="e.g. English (Fluent)"
+            getLabel={language => typeof language === 'string' ? language : language.name || language.language || ''}
+            createItem={name => ({ name, language: name, proficiency: '' })}
           />
         </div>
 
@@ -542,8 +498,11 @@ export default function Certifications() {
         </div>
 
         {/* ── Buttons row ── */}
+        {saveError && (
+          <p style={{ color: '#b91c1c', fontSize: '0.78rem', margin: '0 0 12px' }}>{saveError}</p>
+        )}
         <div style={{ display: 'flex', gap: 12, marginBottom: 32 }}>
-          <button onClick={() => navigate(`/app/resume-builder/portfolio?template=${templateId}`)}
+          <button onClick={() => navigate(`/app/resume-builder/summary?template=${templateId}`)}
             style={{ flex: 1, padding: '10px 0', borderRadius: 999, fontSize: '0.9rem', fontWeight: 600, border: '2px solid #4f46e5', background: '#fff', color: '#4f46e5', cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.background = '#eef2ff'}
             onMouseLeave={e => e.currentTarget.style.background = '#fff'}>

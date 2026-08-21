@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdOutlineDescription, MdUpload, MdEdit, MdDownload, MdOutlineFileDownload, MdMoreVert, MdDelete, MdOutlineVisibility } from 'react-icons/md'
+import { MdOutlineDescription, MdUpload, MdEdit, MdDownload, MdMoreVert, MdDelete, MdOutlineVisibility } from 'react-icons/md'
 import { useResume, ResumeContext } from '../../context/ResumeContext'
 import templateMap from '../ResumeBuilder/templates/templateMap'
 import { achievementApi, certificationApi, languageApi, pdfApi, profileApi, resumeApi } from '../../utils/api'
@@ -76,12 +76,7 @@ function ScoreBar({ score }) {
 // ── Resume Card ───────────────────────────────────────────────────────────────
 function ResumeCard({ resume, onEdit, onDelete, onView, onServerDownload }) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const MAX_BACKEND_ID = 2_147_483_647
-  const resumeId = Number(resume.id)
-  const hasBackendResume =
-    Number.isInteger(resumeId) &&
-    resumeId > 0 &&
-    resumeId <= MAX_BACKEND_ID
+  const templateId = resume.template_id ?? resume.templateId ?? 1
 
   return (
     <div className="bg-white rounded-4 p-3" style={{ border: '1px solid #e5e7eb', position: 'relative', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
@@ -91,7 +86,7 @@ function ResumeCard({ resume, onEdit, onDelete, onView, onServerDownload }) {
           onClick={() => onView(resume)}
           style={{ width: 100, height: 130, flexShrink: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb', cursor: 'pointer' }}
         >
-          <ResumeThumbnail templateId={resume.templateId} />
+          <ResumeThumbnail templateId={templateId} />
         </div>
 
         {/* Info */}
@@ -110,25 +105,14 @@ function ResumeCard({ resume, onEdit, onDelete, onView, onServerDownload }) {
               <MdEdit size={14} /> Edit
             </button>
 
-            {hasBackendResume ? (
-              <button
-                onClick={() => onServerDownload(resume)}
-                className="btn btn-sm d-flex align-items-center justify-content-center"
-                style={{ background: '#ecfdf5', color: '#047857', borderRadius: 8, border: 'none', width: 32, height: 32 }}
-                title="Download PDF"
-              >
-                <MdDownload size={16} />
-              </button>
-            ) : (
-              <button
-                onClick={() => onView(resume)}
-                className="btn btn-sm d-flex align-items-center justify-content-center"
-                style={{ background: '#eef2ff', color: '#4f46e5', borderRadius: 8, border: 'none', width: 32, height: 32 }}
-                title="Quick download in browser"
-              >
-                <MdOutlineFileDownload size={16} />
-              </button>
-            )}
+            <button
+              onClick={() => onServerDownload(resume)}
+              className="btn btn-sm d-flex align-items-center justify-content-center"
+              style={{ background: '#ecfdf5', color: '#047857', borderRadius: 8, border: 'none', width: 32, height: 32 }}
+              title="Download PDF"
+            >
+              <MdDownload size={16} />
+            </button>
 
             {/* More */}
             <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
@@ -178,6 +162,9 @@ export default function Resume() {
   const [pendingTitle, setPendingTitle] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState(null)
   const [importing, setImporting] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [selectingId, setSelectingId] = useState(null)
+  const [resumeError, setResumeError] = useState('')
   const [importError, setImportError] = useState('')
   const inputRef            = useRef()
 
@@ -205,39 +192,34 @@ export default function Resume() {
 
   const handleTemplateSelect = async (templateId = selectedTemplate) => {
     if (!templateId || !pendingTitle) return
+    setCreating(true)
+    setResumeError('')
+
     // Clear all previous resume data so the new CV starts completely fresh
     ctx?.clearResumeData?.()
     ctx?.setResumeTitle?.(pendingTitle)
     setTemplateModal(false)
 
-    // Create the resume in the backend so we have a real integer ID.
-    // Fall back to a local placeholder only if the API fails (offline use).
-    let realId = null
     try {
       const { data } = await resumeApi.create({
         title: pendingTitle,
+        template_id: Number(templateId),
         template: 'classic',
       })
-      realId = data?.id ?? null
+      if (!data?.id) throw new Error('The backend did not return a resume ID.')
+      await ctx?.loadResume?.(data.id)
+      await ctx?.refreshResumes?.()
+      navigate(`/app/profile?template=${templateId}`)
     } catch (err) {
       console.error('Resume create failed:', err)
+      setResumeError(
+        err.response?.data?.detail ||
+        err.message ||
+        'Unable to create the resume. Please try again.',
+      )
+    } finally {
+      setCreating(false)
     }
-
-    const resumeEntry = {
-      id: realId ?? Date.now(), // real ID preferred; fake only as last resort
-      title: pendingTitle,
-      templateId,
-      score: 0,
-      createdAt: new Date().toLocaleDateString(),
-    }
-
-    setResumes(prev => [...prev, resumeEntry])
-
-    if (realId) {
-      ctx?.setCurrentResumeId?.(realId)
-    }
-
-    navigate(`/app/profile?template=${templateId}`)
   }
 
   const handleKeyDown = (e) => {
@@ -247,23 +229,40 @@ export default function Resume() {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this resume?')) return
-    // Remove from local state immediately for responsive UI
-    setResumes(prev => prev.filter(r => r.id !== id))
-    // Only call backend if it's a real backend ID (not a local fake timestamp)
-    const MAX_BACKEND_ID = 2_147_483_647
-    const n = Number(id)
-    if (Number.isInteger(n) && n > 0 && n <= MAX_BACKEND_ID) {
-      try {
-        await resumeApi.delete(id)
-        ctx?.deleteResume?.(id)
-      } catch (err) {
-        console.error('Resume delete failed:', err)
-      }
+    setResumeError('')
+    try {
+      await ctx?.deleteResume?.(id)
+      await ctx?.refreshResumes?.()
+    } catch (err) {
+      console.error('Resume delete failed:', err)
+      setResumeError(
+        err.response?.data?.detail ||
+        'Unable to delete the resume. Please try again.',
+      )
     }
   }
 
-  const handleView  = (resume) => navigate(`/app/resume-builder/preview?template=${resume.templateId}`)
-  const handleEdit  = (resume) => navigate(`/app/profile?template=${resume.templateId}`)
+  const openResume = async (resume, destination) => {
+    if (!resume?.id || selectingId) return
+    setSelectingId(resume.id)
+    setResumeError('')
+    try {
+      const loaded = await ctx?.loadResume?.(resume.id)
+      if (!loaded) throw new Error('The resume could not be loaded.')
+      navigate(`${destination}?template=${loaded.template_id}`)
+    } catch (err) {
+      console.error('Resume selection failed:', err)
+      setResumeError(
+        err.response?.data?.detail ||
+        'Unable to load this resume. Please try again.',
+      )
+    } finally {
+      setSelectingId(null)
+    }
+  }
+
+  const handleView = (resume) => openResume(resume, '/app/resume-builder/preview')
+  const handleEdit = (resume) => openResume(resume, '/app/profile')
 
   const handleServerDownload = async (resume) => {
     try {
@@ -292,6 +291,7 @@ export default function Resume() {
       const cvTitle = file.name.replace(/\.[^.]+$/, '')
       const { data: created } = await resumeApi.create({
         title: cvTitle,
+        template_id: 1,
         template: 'classic',
       })
       const resumeId = created?.id
@@ -404,6 +404,7 @@ export default function Resume() {
 
       ctx?.setResumeTitle?.(cvTitle)
       ctx?.setCurrentResumeId?.(resumeId)
+      await ctx?.loadResume?.(resumeId)
       ctx?.setProfileSaved?.(true)
       ctx?.setExperienceSaved?.(true)
       ctx?.setEducationSaved?.(true)
@@ -442,7 +443,7 @@ export default function Resume() {
         <div
           className="bg-white rounded-4 shadow-sm d-flex flex-column align-items-center justify-content-center p-4"
           style={{ width: 200, minHeight: 140, cursor: 'pointer', border: '2px solid #e5e7eb', transition: 'border-color 0.2s, box-shadow 0.2s' }}
-          onClick={openModal}
+          onClick={() => !creating && openModal()}
           onMouseEnter={e => { e.currentTarget.style.borderColor = '#4f46e5'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(79,70,229,0.12)' }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none' }}
         >
@@ -451,7 +452,7 @@ export default function Resume() {
             <MdOutlineDescription size={28} color="#4f46e5" />
           </div>
           <p className="fw-bold mb-0 text-center" style={{ fontSize: '0.88rem', color: '#1e293b' }}>
-            Create New CV ✏️
+            {creating ? 'Creating CV…' : 'Create New CV ✏️'}
           </p>
           <p className="text-muted mb-0" style={{ fontSize: '0.72rem' }}>Start Fresh</p>
         </div>
@@ -493,6 +494,14 @@ export default function Resume() {
           style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: '0.82rem' }}>
           ⚠️ {importError}
           <button onClick={() => setImportError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>×</button>
+        </div>
+      )}
+
+      {resumeError && (
+        <div className="d-flex align-items-center gap-2 mb-3 px-3 py-2 rounded-3"
+          style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: '0.82rem' }}>
+          {resumeError}
+          <button onClick={() => setResumeError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>×</button>
         </div>
       )}
 
